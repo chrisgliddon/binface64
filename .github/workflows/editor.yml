@@ -1,4 +1,4 @@
-name: Windows (MSYS2 UCRT64)
+name: Editor Build (Windows / Linux / macOS)
 
 on:
   push:
@@ -94,3 +94,38 @@ jobs:
           name: pyrite64-linux
           path: |
             Pyrite64-x86_64.AppImage
+
+  build-macos:
+    # Apple Silicon runner; CMAKE_OSX_ARCHITECTURES builds a universal
+    # (arm64 + x86_64) binary so it runs on both Apple Silicon and Intel Macs.
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          lfs: true
+
+      # Ensures a CMake >= 3.28 (C++23) and Ninja
+      - name: Setup CMake + Ninja
+        uses: lukka/get-cmake@latest
+
+      - name: Configure CMake
+        run: |
+          cmake --preset macos-release
+
+      - name: Build
+        run: |
+          cmake --build --preset macos-release
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: pyrite64-macos
+          include-hidden-files: true
+          path: |
+            pyrite64
+            data
+            n64
+            LICENSE
