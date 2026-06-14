@@ -288,6 +288,13 @@ add_executable(pyrite64 src/main.cpp
         src/renderer/animation.cpp
 )
 
+# libdragon's C headers (e.g. surface_make in surface.h) use narrowing
+# conversions in braced initializers. GCC only warns, but Clang/AppleClang
+# treat this as a hard error, so relax it there to keep the macOS build working.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(pyrite64 PRIVATE -Wno-narrowing)
+endif()
+
 target_include_directories(pyrite64 PRIVATE
     vendored
     vendored/imgui
