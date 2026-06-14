@@ -36,9 +36,15 @@ fi
 
 # 2. Stage the AppDir. data/ and n64/ live beside the binary in usr/bin.
 rm -rf "$APPDIR"
-mkdir -p "$APPDIR/usr/bin"
-cp "$ROOT/pyrite64" "$APPDIR/usr/bin/"
-cp -r "$ROOT/data" "$ROOT/n64" "$ROOT/LICENSE" "$APPDIR/usr/bin/"
+BIN="$APPDIR/usr/bin"
+mkdir -p "$BIN/n64"
+cp "$ROOT/pyrite64" "$BIN/"
+cp -r "$ROOT/data" "$ROOT/LICENSE" "$BIN/"
+cp -r "$ROOT/n64/engine" "$BIN/n64/engine"
+# bundle all examples, but strip build files that may exists
+cp -r "$ROOT/n64/examples" "$BIN/n64/examples"
+find "$BIN/n64/examples" -type d \( -name build -o -name engine -o -name filesystem \) -prune -exec rm -rf {} +
+find "$BIN/n64/examples" \( -name '*.z64' -o -name '*.pak' \) -delete
 
 # 3. Fetch packaging tools (cached).
 mkdir -p "$TOOLS"
