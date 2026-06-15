@@ -22,6 +22,12 @@ import subprocess
 # manual or CSS; do a full build (default) when you need the API or before deploy.
 _fast = os.environ.get("PYRITE_DOCS_FAST") == "1"
 
+# Within a FULL build, the watch loop sets this when a change doesn't touch any
+# C++ API input (e.g. CSS or a manual page). Breathe and the API pages stay
+# enabled, but the slow Doxygen + _apigen regeneration is skipped and the already
+# generated pages/XML are reused. See build_and_serve.sh.
+_skip_doxygen = os.environ.get("PYRITE_DOCS_SKIP_DOXYGEN") == "1"
+
 extensions = ['myst_parser']
 if not _fast:
     extensions += ['breathe']
@@ -53,12 +59,17 @@ if not _fast:
 
     # Run on every build so the API docs always match the headers. Skip if the
     # doxygen binary is missing (e.g. minimal env) but XML already exists.
-    try:
-        subprocess.run(["doxygen", "Doxyfile"], cwd=_docs_dir, check=True)
-    except (FileNotFoundError, subprocess.CalledProcessError) as err:
-        if not os.path.isdir(_doxygen_xml):
-            raise
-        print(f"[conf.py] WARNING: doxygen not run ({err}); using existing XML.")
+    # In SKIP_DOXYGEN mode we reuse the existing XML/pages from the last full build.
+    if _skip_doxygen:
+        print("[conf.py] SKIP_DOXYGEN: reusing existing C++ API "
+              "(no Doxygen/_apigen run).")
+    else:
+        try:
+            subprocess.run(["doxygen", "Doxyfile"], cwd=_docs_dir, check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError) as err:
+            if not os.path.isdir(_doxygen_xml):
+                raise
+            print(f"[conf.py] WARNING: doxygen not run ({err}); using existing XML.")
 
     breathe_projects = {"pyrite64": _doxygen_xml}
     breathe_default_project = "pyrite64"
@@ -67,14 +78,16 @@ if not _fast:
     # Generate the API page tree from the Doxygen XML: a root page, a page per
     # namespace (free functions/variables/typedefs/enums rendered inline), and a
     # separate page per class/struct linked as sub-pages. See _apigen.py.
-    import sys
-    sys.path.insert(0, _docs_dir)
-    import _apigen
-    _apigen.generate(
-        xml_dir=_doxygen_xml,
-        out_dir=os.path.join(_docs_dir, "docs", "manual", "api"),
-        project="pyrite64",
-    )
+    # Skipped in SKIP_DOXYGEN mode; the pages from the last full build are reused.
+    if not _skip_doxygen:
+        import sys
+        sys.path.insert(0, _docs_dir)
+        import _apigen
+        _apigen.generate(
+            xml_dir=_doxygen_xml,
+            out_dir=os.path.join(_docs_dir, "docs", "manual", "api"),
+            project="pyrite64",
+        )
 
     # Wrap long C++ signatures onto multiple lines (one parameter per line) instead
     # of one cramped horizontal line. Pairs with the API card styling in custom.css.

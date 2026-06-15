@@ -62,6 +62,10 @@ dl.cpp.friend {
 dl[class]:not(.option-list):not(.field-list):not(.footnote):not(.glossary):not(.simple) dd {
   margin: 0;
 
+  & > ul.simple {
+    margin: 0;
+  }
+
   &.field-odd, &.field-even {
     margin-left: 24px;
   }
@@ -72,6 +76,10 @@ dl.cpp.class > dt:first-child {
   text-indent: 8px;
 }
 
+dl.cpp.type > dt:first-child,
+dl.cpp.var > dt:first-child,
+dl.cpp.enum-class > dt:first-child,
+dl.cpp.enumerator > dt:first-child,
 dl.cpp.function > dt:first-child {
   text-indent: 0px;
   padding-left: 8px;
