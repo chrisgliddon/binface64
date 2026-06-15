@@ -15,4 +15,4 @@ General documentation for the editor and runtime-engine.
   manual/editor
   manual/script
   manual/cli
-  manual/api
+  manual/api/library_root
