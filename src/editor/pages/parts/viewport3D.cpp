@@ -18,6 +18,7 @@
 #include "glm/gtc/matrix_transform.hpp"
 #include "glm/gtx/matrix_decompose.hpp"
 #include "SDL3/SDL_gpu.h"
+#include "SDL3/SDL_mouse.h"
 #include "IconsMaterialDesignIcons.h"
 #include "../../undoRedo.h"
 #include "../../selectionUtils.h"
@@ -668,6 +669,23 @@ void Editor::Viewport3D::onPostRender(Renderer::Scene &renderScene) {
   }
 }
 
+void Editor::Viewport3D::setCameraDrag(bool active)
+{
+  if (active == cameraDragActive) return;
+  cameraDragActive = active;
+
+  if (active) {
+    ImVec2 p = ImGui::GetMousePos();
+    cursorLockPos = {p.x, p.y};
+    SDL_SetWindowRelativeMouseMode(ctx.window, true);
+    cameraDragFlush = true;
+  } else {
+    // Restore the cursor where the drag began, then hand control back to the OS.
+    SDL_WarpMouseInWindow(ctx.window, cursorLockPos.x, cursorLockPos.y);
+    SDL_SetWindowRelativeMouseMode(ctx.window, false);
+  }
+}
+
 void Editor::Viewport3D::draw()
 {
   auto &gizStyle = ImViewGuizmo::GetStyle();
@@ -796,13 +814,27 @@ void Editor::Viewport3D::draw()
   auto &io = ImGui::GetIO();
   float deltaTime = io.DeltaTime;
 
+  // avoid ghost-interactions from imgui's own mouse sampling
+  if (cameraDragActive) io.MousePos = ImVec2(cursorLockPos.x, cursorLockPos.y);
+
   ImVec2 gizPos{currPos.x + currSize.x - 50_px, currPos.y + 104_px};
 
   // mouse pos
   ImVec2 screenPos = ImGui::GetCursorScreenPos();
-  mousePos = {ImGui::GetMousePos().x, ImGui::GetMousePos().y};
-  mousePos.x -= (screenPos.x + offX);
-  mousePos.y -= vpOffsetY; // already includes the letterbox offset (set at image placement)
+  if (cameraDragActive) {
+    float dx = 0, dy = 0;
+    SDL_GetRelativeMouseState(&dx, &dy);
+    if (cameraDragFlush) { // skip first sample to not make the camera jump around
+      cameraDragFlush = false;
+    } else {
+      mousePos.x += dx;
+      mousePos.y += dy;
+    }
+  } else {
+    mousePos = {ImGui::GetMousePos().x, ImGui::GetMousePos().y};
+    mousePos.x -= (screenPos.x + offX);
+    mousePos.y -= vpOffsetY;
+  }
 
   if (!ctx.prefs.mouseWheelModifiesSpeed) moveSpeedModifier = 1.0f;
   float moveSpeed = (ctx.prefs.moveSpeed * moveSpeedModifier) * deltaTime;
@@ -894,7 +926,7 @@ void Editor::Viewport3D::draw()
   if(isMouseHover)
   {
     ImGui::SetMouseCursor(
-      mouseHeldRight ? ImGuiMouseCursor_None : ImGuiMouseCursor_Arrow
+      cameraDragActive ? ImGuiMouseCursor_None : ImGuiMouseCursor_Arrow
     );
   }
 
@@ -1080,6 +1112,12 @@ void Editor::Viewport3D::draw()
   ImGui::SetCursorPosY(currPos.y + BAR_HEIGHT);
 
   auto dragDelta = mousePos - mousePosStart;
+
+  // Orbit / pan / look all move the view freely, so lock the cursor for them
+  bool wantCameraDrag = isMouseDown && inputActive && !camLocked &&
+    ((isAltDown && mouseHeldLeft) || mouseHeldMiddle || mouseHeldRight);
+  setCameraDrag(wantCameraDrag);
+
   if (isMouseDown && inputActive) {
     ImGui::ClearActiveID();
     if (!camLocked) {
