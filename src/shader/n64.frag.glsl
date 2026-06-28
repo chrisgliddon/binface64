@@ -328,6 +328,7 @@ void main()
   }
   //FragColor.a = 1.0;
   // FragColor = cc_shade; // TEST
+  //FragColor.rgb = v_color.rgb; // TEST
 
   /*{
     uint oldColorInt = 0;
