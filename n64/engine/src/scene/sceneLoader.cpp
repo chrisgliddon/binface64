@@ -103,8 +103,6 @@ P64::Object* P64::Scene::loadObject(uint8_t* &objFile, std::function<void(Object
 
   allocSize += compDataSize;
 
-  //debugf("Allocating object %d | comps: %d | size: %lu bytes\n", objEntry->id, compCount, allocSize);
-
   void* objMem = memalign(DATA_ALIGN, allocSize); // @TODO: custom allocator
   memObjects += malloc_usable_size(objMem);
 
@@ -132,7 +130,7 @@ P64::Object* P64::Scene::loadObject(uint8_t* &objFile, std::function<void(Object
   while(ptrIn[1] != 0)
   {
     uint8_t compId = ptrIn[0];
-    uint8_t argSize = ptrIn[1] * 4;
+    uint32_t argSize = ptrIn[1] * 4;
 
     const auto &compDef = COMP_TABLE[compId];
     // debugf("Alloc: comp %d (arg: %d)\n", compId, argSize);

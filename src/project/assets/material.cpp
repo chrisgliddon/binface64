@@ -49,22 +49,25 @@ void Project::Assets::MaterialTex::deserialize(const nlohmann::json &doc)
 
 void Project::Assets::MaterialTex::build(
   Utils::BinaryFile &file,
-  Build::SceneCtx &sceneCtx
+  Build::SceneCtx &sceneCtx,
+  bool disablePlaceholder
 ) const
 {
+  int dynTypeOut = disablePlaceholder ? DYN_TYPE_NONE : dynType.value;
+
   auto assetIdx = sceneCtx.assetUUIDToIdx.find(texUUID.value);
   if(assetIdx == sceneCtx.assetUUIDToIdx.end()) {
     file.write<uint16_t>(0xFFFF);
 
-    if(dynType.value == DYN_TYPE_NONE) {
+    if(dynTypeOut == DYN_TYPE_NONE) {
       throw std::runtime_error("Material Texture UUID not found: " + std::to_string(texUUID.value));
     }
   } else {
     file.write<uint16_t>(assetIdx->second);
   }
 
-  file.write<uint8_t>(dynType.value);
-  file.write<uint8_t>(dynPlaceholder.value);
+  file.write<uint8_t>(dynTypeOut);
+  file.write<uint8_t>(disablePlaceholder ? 0 : dynPlaceholder.value);
 
   file.write<uint16_t>(offset.value[0] * 64.0f);
   file.write<uint16_t>(repeat.value[0] * 16);

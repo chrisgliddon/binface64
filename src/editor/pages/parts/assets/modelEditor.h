@@ -15,6 +15,7 @@ namespace Editor
     private:
       uint64_t assetUUID{};
       std::string winName{};
+      bool placeholderOverflow{false};
 
     public:
       explicit ModelEditor(uint64_t assetUUID) : assetUUID(assetUUID) {}

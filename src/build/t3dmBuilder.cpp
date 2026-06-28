@@ -20,7 +20,8 @@ namespace
   bool matWriter(
     Build::SceneCtx &sceneCtx,
     std::shared_ptr<BinaryFile> f,
-    const Project::Assets::Material &mat
+    const Project::Assets::Material &mat,
+    int &phSlotCount // running placeholder count across the whole model
   ) {
     uint32_t flags = 0;
 
@@ -29,19 +30,30 @@ namespace
     f->write<uint32_t>(mat.drawFlags.value);
 
     int placeholders = 0;
+    // Drop any placeholder past the runtime slot limit so it is built as a static texture
+    // rather than one that references an unregistered slot, which corrupts memory at runtime.
+    auto writeTex = [&](const Project::Assets::MaterialTex &tex) {
+      bool isPlaceholder = tex.dynType.value != Project::Assets::MaterialTex::DYN_TYPE_NONE;
+      bool drop = isPlaceholder && phSlotCount >= Project::Assets::MaterialTex::MAX_PLACEHOLDERS;
+      if(drop) {
+        Utils::Logger::log("Model exceeds " + std::to_string(Project::Assets::MaterialTex::MAX_PLACEHOLDERS)
+          + " texture placeholders, the extra one was disabled", Utils::Logger::LEVEL_ERROR);
+      } else if(isPlaceholder) {
+        ++placeholders;
+        ++phSlotCount;
+      }
+      Utils::BinaryFile subFile{};
+      tex.build(subFile, sceneCtx, drop);
+      f->writeArray(subFile.getData().data(), subFile.getSize());
+    };
+
     if(mat.tex0.set.value) {
       flags |= P64::Renderer::Material::FLAG_TEX0;
-      if(mat.tex0.dynType.value)++placeholders;
-      Utils::BinaryFile subFile{};
-      mat.tex0.build(subFile, sceneCtx);
-      f->writeArray(subFile.getData().data(), subFile.getSize());
+      writeTex(mat.tex0);
     }
     if(mat.tex1.set.value) {
       flags |= P64::Renderer::Material::FLAG_TEX1;
-      if(mat.tex1.dynType.value)++placeholders;
-      Utils::BinaryFile subFile{};
-      mat.tex1.build(subFile, sceneCtx);
-      f->writeArray(subFile.getData().data(), subFile.getSize());
+      writeTex(mat.tex1);
     }
 
     if(placeholders == 2) {
@@ -218,11 +230,12 @@ bool Build::buildT3DMAssets(Project::Project &project, SceneCtx &sceneCtx)
 
       auto &t3dm = model.model.t3dm;
 
-      config.materialWriter = [&sceneCtx, &model](std::shared_ptr<BinaryFile> f, const T3DM::Material &material, uint32_t matIdx) {
+      int phSlotCount = 0; // placeholder slots used so far across this model's materials
+      config.materialWriter = [&sceneCtx, &model, &phSlotCount](std::shared_ptr<BinaryFile> f, const T3DM::Material &material, uint32_t matIdx) {
         auto pyriteMat = model.model.materials.find(material.name);
         if(pyriteMat != model.model.materials.end()) {
           printf("Using custom material writer for '%s'\n", material.name.c_str());
-          return matWriter(sceneCtx, f, pyriteMat->second);
+          return matWriter(sceneCtx, f, pyriteMat->second, phSlotCount);
         }
         throw std::runtime_error("Missing material: " + material.name);
       };
