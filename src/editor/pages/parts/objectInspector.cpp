@@ -15,6 +15,7 @@
 
 #include "imgui_internal.h"
 #include "../../imgui/helper.h"
+#include "../../transformUtils.h"
 #include "../../../context.h"
 #include "../../../project/component/components.h"
 #include "../../selectionUtils.h"
@@ -464,7 +465,15 @@ void Editor::ObjectInspector::draw() {
   {
     if(ImTable::start("Transform", tableObj))
     {
-      ImTable::addObjProp("Pos", xfSrc->pos);
+      ImTable::addObjProp(
+        "Pos",
+        xfSrc->pos,
+        Editor::TransformUtils::preserveChildTransformsDuringEdit<glm::vec3>(obj.get(), [](glm::vec3 *val) -> bool {
+          // Use the standard vector editor while preserving child offsets
+          return ImTable::typedInput<glm::vec3>(val);
+        }),
+        nullptr
+      );
 
       if(xfSrc->proportionalScale)
       {
@@ -491,9 +500,22 @@ void Editor::ObjectInspector::draw() {
           *val = scale * ratio;
           return ratio != 1.0f;
         };
-        ImTable::addObjProp("Scale", xfSrc->scale, cb, nullptr);
+        ImTable::addObjProp(
+          "Scale",
+          xfSrc->scale,
+          Editor::TransformUtils::preserveChildTransformsDuringEdit<glm::vec3>(obj.get(), cb),
+          nullptr
+        );
       } else {
-        ImTable::addObjProp("Scale", xfSrc->scale);
+        ImTable::addObjProp(
+          "Scale",
+          xfSrc->scale,
+          Editor::TransformUtils::preserveChildTransformsDuringEdit<glm::vec3>(obj.get(), [](glm::vec3 *val) -> bool {
+            // Use the standard vector editor while preserving child offsets
+            return ImTable::typedInput<glm::vec3>(val);
+          }),
+          nullptr
+        );
       }
 
       // icon to toggle between proportional and independent scale
@@ -508,7 +530,15 @@ void Editor::ObjectInspector::draw() {
         : "Change to Proportional Scale"
       );
 
-      ImTable::addObjProp("Rot", xfSrc->rot);
+      ImTable::addObjProp(
+        "Rot",
+        xfSrc->rot,
+        Editor::TransformUtils::preserveChildTransformsDuringEdit<glm::quat>(obj.get(), [](glm::quat *val) -> bool {
+          // Use the standard quaternion editor while preserving child offsets
+          return ImTable::typedInput<glm::quat>(val);
+        }),
+        nullptr
+      );
 
       // icon to toggle between quaternion and euler
       ImGui::SameLine();
@@ -619,8 +649,11 @@ void Editor::ObjectInspector::draw() {
       ImGui::OpenPopup("CompSelect");
     }
 
-    const ImVec2 contentMin = ImGui::GetWindowPos() + ImGui::GetWindowContentRegionMin();
-    const ImVec2 contentMax = ImGui::GetWindowPos() + ImGui::GetWindowContentRegionMax();
+    const ImVec2 windowPos = ImGui::GetWindowPos();
+    const ImVec2 contentRegionMin = ImGui::GetWindowContentRegionMin();
+    const ImVec2 contentRegionMax = ImGui::GetWindowContentRegionMax();
+    const ImVec2 contentMin{windowPos.x + contentRegionMin.x, windowPos.y + contentRegionMin.y};
+    const ImVec2 contentMax{windowPos.x + contentRegionMax.x, windowPos.y + contentRegionMax.y};
 
     ImRect panelDropRect{contentMin, contentMax};
     handleScriptComponentDropTarget(srcObj, panelDropRect, true);
