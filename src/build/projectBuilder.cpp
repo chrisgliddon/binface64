@@ -13,6 +13,7 @@
 #include "../utils/string.h"
 #include "../utils/textureFormats.h"
 #include "romMetaBuilder.h"
+#include "../editor/imgui/notification.h"
 
 namespace fs = std::filesystem;
 using AT = Project::FileType;
@@ -165,7 +166,9 @@ bool Build::buildProject(const std::string &configPath)
       buildScene(project, scene, sceneCtx);
     } catch(const std::exception &e)
     {
-      Utils::Logger::log(std::string("Scene build failed: ") + e.what(), Utils::Logger::LEVEL_ERROR);
+      auto msg = std::string("Scene build failed:\n") + e.what();
+      Utils::Logger::log(msg, Utils::Logger::LEVEL_ERROR);
+      Editor::Noti::add(Editor::Noti::Type::ERROR, msg);
       return false;
     }
   }

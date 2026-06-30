@@ -107,7 +107,15 @@ namespace Project::Component::Code
         uint64_t uuid = Utils::parseU64(val);
         ctx.fileObj.write<uint32_t>(ctx.assetUUIDToIdx[uuid]);
       } else {
-        ctx.fileObj.writeAs(val, field.type);
+        try
+        {
+          ctx.fileObj.writeAs(val, field.type);
+        } catch (...) {
+          std::string error = script->getName() + ": Invalid argument value '" + val + "' for '" + field.name + "' "
+            "(type-id " + std::to_string(field.type) + ")";
+          Utils::Logger::log(error, Utils::Logger::LEVEL_ERROR);
+          throw std::runtime_error(error);
+        }
       }
     }
   }
