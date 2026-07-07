@@ -13,6 +13,8 @@ Pyrite\ :sup:`64`
   docs/manual
   docs/dev
   docs/version
+  docs/project
+  docs/agent
 
 .. _tiny3d: https://github.com/HailToDodongo/tiny3d
 .. _Libdragon: https://github.com/DragonMinded/libdragon
