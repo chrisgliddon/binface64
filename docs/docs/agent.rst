@@ -10,4 +10,7 @@ how sessions hand off context to one another.
   :maxdepth: 2
   :caption: Contents:
 
+  agent/ARCHITECTURE
+  agent/CODEMAP
+  agent/HANDOFF
   agent/DIVERGENCE
