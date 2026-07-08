@@ -17,3 +17,8 @@ Optimize for precision and retrievability, not prose.
   n64/display-and-video
   n64/audio
   n64/emulation-and-hardware-testing
+  n64/textures
+  n64/models-and-meshes
+  n64/audio-assets
+  n64/rom-budgets
+  n64/asset-checklist
