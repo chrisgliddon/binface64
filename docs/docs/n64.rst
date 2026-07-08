@@ -1,0 +1,19 @@
+N64 Hardware & Systems Reference
+====================================
+
+Authoritative, number-dense reference docs for the N64 hardware and the
+libdragon/tiny3d software stack that Binface64 sits on. All future skills,
+MCP tools, and validators cite these. Audience: LLM agents building games.
+Optimize for precision and retrievability, not prose.
+
+
+.. toctree::
+  :maxdepth: 2
+  :caption: Contents:
+
+  n64/hardware
+  n64/performance-budgets
+  n64/libdragon-tiny3d
+  n64/display-and-video
+  n64/audio
+  n64/emulation-and-hardware-testing
