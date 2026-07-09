@@ -9,7 +9,6 @@
 #include "systems/dropShadows.h"
 #include "systems/sprites.h"
 #include "collision/gfxScale.h"
-#include "../p64/assetTable.h"
 
 namespace
 {
