@@ -29,9 +29,10 @@ DEFAULT_HISTORY_PATH = REPO_ROOT / ".bf64" / "operations.jsonl"
 PROJECT_FILENAME = "project.p64proj"
 EMPTY_PROJECT_TEMPLATE = REPO_ROOT / "n64" / "examples" / "empty"
 MAX_COMPONENT_ID = 12
-CLI_VERSION = "0.8.0"
+CLI_VERSION = "0.9.0"
 HISTORY_SCHEMA_VERSION = 2
 VALIDATABLE_ASSET_KINDS = {"texture", "model", "audio", "font"}
+IMPORTABLE_ASSET_KINDS = {"texture", "model", "audio", "font"}
 PROJECT_ASSET_KINDS = ("texture", "model", "audio", "font", "prefab", "node_graph", "unknown")
 PYRITE_BINARY_NAMES = ("pyrite64", "pyrite64.exe")
 BUILD_TOOLCHAIN_FILES = (
@@ -3075,6 +3076,369 @@ def validate_asset(args: argparse.Namespace) -> int:
     return exit_code
 
 
+DEFAULT_FONT_CHARSET = (
+    " !\"#$%&'()*+,-./\n"
+    "0123456789:;<=>?@\n"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`\n"
+    "abcdefghijklmnopqrstuvwxyz{|}~"
+)
+
+
+def random_u64() -> int:
+    value = uuid.uuid4().int & ((1 << 64) - 1)
+    return value or 1
+
+
+def normalize_asset_dest(source: Path, dest_arg: str | None) -> Path:
+    if not dest_arg:
+        return Path(source.name)
+    raw = dest_arg.replace("\\", "/")
+    if raw.startswith("assets/"):
+        raw = raw[len("assets/") :]
+    dest = Path(raw)
+    if raw.endswith("/") or dest.suffix == "":
+        dest = dest / source.name
+    return dest
+
+
+def is_safe_asset_relative_path(path: Path) -> bool:
+    if path.is_absolute():
+        return False
+    return all(part not in {"", ".", ".."} for part in path.parts)
+
+
+def editor_imports_extension(source: Path, kind: str) -> bool:
+    ext = source.suffix.lower()
+    if kind == "texture":
+        return ext == ".png"
+    if kind == "model":
+        return ext in {".glb", ".gltf"}
+    if kind == "audio":
+        return ext in {".wav", ".mp3", ".xm"}
+    if kind == "font":
+        return ext == ".ttf"
+    return False
+
+
+def parse_int_option(value: Any, name: str, issues: list[dict[str, str]]) -> int | None:
+    if value is None:
+        return None
+    parsed = optional_int(value)
+    if parsed is None:
+        issues.append(issue("error", "IMPORT_CONF", f"{name} must be an integer; got {value}."))
+    return parsed
+
+
+def default_import_conf(
+    source: Path,
+    kind: str,
+    args: argparse.Namespace,
+    limits: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    issues: list[dict[str, str]] = []
+    conf: dict[str, Any] = {
+        "uuid": random_u64(),
+        "format": 0,
+        "baseScale": 16,
+        "compression": 0,
+        "gltfBVH": False,
+        "exclude": bool(getattr(args, "exclude", False)),
+        "fontCharset": "",
+        "fontId": 0,
+        "wavCompression": 0,
+        "wavForceMono": False,
+        "wavResampleRate": 0,
+        "data": {},
+    }
+
+    compression = parse_int_option(getattr(args, "compression", None), "compression", issues)
+    if compression is not None:
+        conf["compression"] = compression
+
+    if kind == "texture":
+        fmt = parse_texture_format(getattr(args, "texture_format", None), limits)
+        if getattr(args, "texture_format", None) is not None:
+            if fmt is None:
+                issues.append(
+                    issue(
+                        "error",
+                        "IMPORT_CONF",
+                        f"Unknown texture format '{args.texture_format}'.",
+                        "Use `bf64 constraints texture --json` to list format ids.",
+                    )
+                )
+            else:
+                conf["format"] = fmt[1]
+        elif source.name.lower().endswith(".bci.png"):
+            conf["format"] = int(limits["texture"]["format_ids"]["BCI_256"])
+        else:
+            inferred = infer_texture_format_from_name(source, limits)
+            if inferred:
+                conf["format"] = inferred[1]
+
+    if kind == "model":
+        base_scale = parse_int_option(getattr(args, "base_scale", None), "baseScale", issues)
+        if base_scale is not None:
+            conf["baseScale"] = base_scale
+        conf["gltfBVH"] = bool(getattr(args, "gltf_bvh", False))
+
+    if kind == "audio":
+        wav_compression = parse_int_option(getattr(args, "wav_compression", None), "wavCompression", issues)
+        if wav_compression is not None:
+            conf["wavCompression"] = wav_compression
+        wav_resample_rate = parse_int_option(getattr(args, "wav_resample_rate", None), "wavResampleRate", issues)
+        if wav_resample_rate is not None:
+            conf["wavResampleRate"] = wav_resample_rate
+        conf["wavForceMono"] = bool(getattr(args, "wav_force_mono", False))
+
+    if kind == "font":
+        font_id = parse_int_option(getattr(args, "font_id", None), "fontId", issues)
+        if font_id is not None:
+            conf["fontId"] = font_id
+        conf["fontCharset"] = getattr(args, "font_charset", None) or DEFAULT_FONT_CHARSET
+
+    return conf, issues
+
+
+def validate_import_source(
+    source: Path,
+    kind: str,
+    conf: dict[str, Any],
+    target_conf: Path,
+    args: argparse.Namespace,
+    limits: dict[str, Any],
+) -> dict[str, Any]:
+    conf_path = str(target_conf)
+    if kind == "texture":
+        return validate_texture(source, conf, conf_path, args, limits)
+    if kind == "model":
+        return validate_model(source, conf, conf_path, args, limits)
+    if kind == "audio":
+        return validate_audio(source, conf, conf_path, args, limits)
+    if kind == "font":
+        return validate_font(source, conf_path)
+    return {
+        "ok": False,
+        "path": str(source),
+        "kind": kind,
+        "metadata": {"conf": conf_path},
+        "issues": [issue("error", "IMPORT_KIND", f"Unsupported import kind: {kind}.")],
+    }
+
+
+def remove_import_output(project_root: Path, target_path: Path, kind: str, changes: list[dict[str, str]]) -> None:
+    outputs = asset_output_paths(project_root, target_path, kind)
+    out_path = outputs.get("out_path")
+    if not out_path:
+        return
+    generated = project_root / out_path
+    if generated.exists() and generated.is_file():
+        generated.unlink()
+        add_change(changes, action="removed", kind="generated_output", path=generated)
+
+
+def import_next_actions(result: dict[str, Any]) -> list[str]:
+    if has_errors(result.get("issues", [])):
+        return ["Fix the reported import issue, then rerun `bf64 import`."]
+    target = result.get("target", {})
+    project = result.get("project", {})
+    if not isinstance(target, dict) or not isinstance(project, dict):
+        return []
+    project_path = shlex.quote(str(project.get("path", "")))
+    asset_ref = shlex.quote(str(target.get("relative_path", "")))
+    return [
+        f"./bf64 asset show {asset_ref} --project {project_path} --json",
+        f"./bf64 build --project {project_path} --json",
+    ]
+
+
+def print_import_result(result: dict[str, Any]) -> None:
+    output_result(result, False)
+    source = result.get("source", {})
+    target = result.get("target", {})
+    if isinstance(source, dict) and isinstance(target, dict):
+        print(f"Import: {source.get('path')} -> {target.get('path')}")
+        print(f"Kind: {source.get('kind')} mode={result.get('mode')}")
+    changes = result.get("changes", [])
+    if isinstance(changes, list):
+        for change in changes:
+            print(f"{change.get('action')} {change.get('kind')}: {change.get('path')}")
+    if result.get("next_actions"):
+        print("Next actions:")
+        for action in result["next_actions"]:
+            print(f"- {action}")
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    limits = load_limits()
+    project_root, config_path, config, issues = resolve_project(args.project)
+    source = Path(args.source).expanduser()
+    changes: list[dict[str, str]] = []
+
+    project_summary_data: dict[str, Any] | str = args.project
+    if project_root is not None and config_path is not None and config is not None:
+        project_summary_data = project_summary(project_root, config_path, config)
+
+    kind = classify_asset(source)
+    dest_rel = normalize_asset_dest(source, args.dest)
+    target_path = (project_root / "assets" / dest_rel) if project_root is not None else Path("assets") / dest_rel
+    target_conf = asset_conf_path(target_path)
+    source_info: dict[str, Any] = {
+        "path": str(source),
+        "kind": kind,
+        "size_bytes": source.stat().st_size if source.exists() and source.is_file() else 0,
+    }
+    target_info: dict[str, Any] = {
+        "path": str(target_path),
+        "relative_path": path_relative_to(target_path, project_root) if project_root is not None else str(Path("assets") / dest_rel),
+        "asset_path": str(dest_rel),
+        "conf_path": str(target_conf),
+    }
+
+    if project_root is None or config_path is None or config is None:
+        pass
+    elif not source.exists():
+        issues.append(issue("error", "IMPORT_SOURCE", f"Source asset does not exist: {source}.", "Check the source path."))
+    elif not source.is_file():
+        issues.append(issue("error", "IMPORT_SOURCE", f"Source asset is not a file: {source}.", "Import one file at a time."))
+    elif source.name.endswith(".conf"):
+        issues.append(issue("error", "IMPORT_SOURCE", "Refusing to import a .conf sidecar as an asset.", "Import the asset file instead."))
+    elif kind not in IMPORTABLE_ASSET_KINDS:
+        issues.append(
+            issue(
+                "error",
+                "IMPORT_KIND",
+                f"`bf64 import` currently supports texture, model, audio, and font assets; got {kind}.",
+                "Use a .png, .glb/.gltf, .wav/.mp3/.xm, or .ttf file. Prefab/node-graph import will follow dedicated validators.",
+            )
+        )
+    elif not editor_imports_extension(source, kind):
+        issues.append(
+            issue(
+                "error",
+                "IMPORT_KIND",
+                f"BF64 editor import does not classify {source.suffix or '(no extension)'} files as {kind} assets.",
+                "Use .png, .glb/.gltf, .wav/.mp3/.xm, or .ttf for headless import.",
+            )
+        )
+
+    if project_root is not None:
+        if not is_safe_asset_relative_path(dest_rel):
+            issues.append(
+                issue(
+                    "error",
+                    "IMPORT_DEST",
+                    f"Destination must stay under assets/ and cannot contain '..': {args.dest or source.name}.",
+                    "Use a relative asset path such as `props/crate.png`.",
+                )
+            )
+        elif target_path.suffix.lower() != source.suffix.lower():
+            issues.append(
+                issue(
+                    "error",
+                    "IMPORT_DEST",
+                    f"Destination extension {target_path.suffix or '(none)'} does not match source extension {source.suffix or '(none)'}.",
+                    "Use a destination filename with the same extension.",
+                )
+            )
+        elif target_path.name.endswith(".conf"):
+            issues.append(issue("error", "IMPORT_DEST", "Destination cannot be a .conf sidecar path."))
+
+        try:
+            if source.exists() and source.resolve() == target_path.resolve(strict=False):
+                issues.append(
+                    issue(
+                        "error",
+                        "IMPORT_DEST",
+                        "Source and destination are the same file.",
+                        "Choose a different --dest or skip import; the asset is already in the project.",
+                    )
+                )
+        except OSError:
+            pass
+        if target_path.exists() and not args.force:
+            issues.append(
+                issue(
+                    "error",
+                    "IMPORT_EXISTS",
+                    f"Target asset already exists: {target_path}.",
+                    "Pass --force to overwrite this asset and its sidecar.",
+                )
+            )
+        if target_conf.exists() and not args.force:
+            issues.append(
+                issue(
+                    "error",
+                    "IMPORT_EXISTS",
+                    f"Target sidecar already exists: {target_conf}.",
+                    "Pass --force to overwrite this sidecar.",
+                )
+            )
+
+    conf: dict[str, Any] = {}
+    validation: dict[str, Any] | None = None
+    if not has_errors(issues) and project_root is not None:
+        conf, conf_issues = default_import_conf(source, kind, args, limits)
+        issues.extend(conf_issues)
+    if not has_errors(issues) and project_root is not None:
+        validation = validate_import_source(source, kind, conf, target_conf, args, limits)
+        issues.extend(validation.get("issues", []))
+
+    if not has_errors(issues) and project_root is not None and not args.dry_run:
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            existed = target_path.exists()
+            shutil.copy2(source, target_path)
+            add_change(changes, action="overwritten" if existed else "created", kind="asset", path=target_path, source=source)
+            conf_existed = target_conf.exists()
+            write_json_file(target_conf, conf)
+            add_change(changes, action="overwritten" if conf_existed else "created", kind="sidecar", path=target_conf)
+            remove_import_output(project_root, target_path, kind, changes)
+        except Exception as exc:  # noqa: BLE001
+            issues.append(
+                issue(
+                    "error",
+                    "IMPORT_IO",
+                    f"Could not import asset: {exc}",
+                    "Check path permissions and available disk space, then rerun `bf64 import`.",
+                )
+            )
+    elif not has_errors(issues) and args.dry_run:
+        add_change(changes, action="would_create" if not target_path.exists() else "would_overwrite", kind="asset", path=target_path, source=source)
+        add_change(changes, action="would_create" if not target_conf.exists() else "would_overwrite", kind="sidecar", path=target_conf)
+
+    imported_entry = asset_entry(project_root, target_path) if project_root is not None and target_path.exists() else target_info
+    artifacts = [
+        artifact_entry(target_path, "imported_asset"),
+        artifact_entry(target_conf, "asset_sidecar"),
+    ]
+    result = {
+        "ok": not has_errors(issues),
+        "command": "import",
+        "kind": "asset_import",
+        "mode": "dry_run" if args.dry_run else "copy",
+        "dry_run": bool(args.dry_run),
+        "project": project_summary_data,
+        "source": source_info,
+        "target": imported_entry,
+        "conf": conf,
+        "validation": validation,
+        "changes": changes,
+        "artifacts": artifacts,
+        "issues": issues,
+        "next_actions": [],
+    }
+    result["next_actions"] = import_next_actions(result)
+
+    exit_code = 1 if has_errors(issues) else 0
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print_import_result(result)
+    record_if_requested(args, result, exit_code, target_path if not args.dry_run else config_path)
+    return exit_code
+
+
 def build_doctor_result(strict: bool = False) -> dict[str, Any]:
     issues: list[dict[str, str]] = []
     checks: list[dict[str, Any]] = []
@@ -3537,6 +3901,29 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
     new.add_argument("--history-path", help="Override operation history JSONL path for --record")
     new.set_defaults(func=cmd_new)
+
+    import_cmd = sub.add_parser("import", help="Import one supported asset into a BF64 project")
+    import_cmd.add_argument("source", help="Source asset file to copy into project assets/")
+    import_cmd.add_argument("--project", default=".", help="Project directory or project.p64proj path")
+    import_cmd.add_argument("--dest", help="Destination under assets/; defaults to the source basename")
+    import_cmd.add_argument("--force", action="store_true", help="Overwrite an existing target asset and sidecar")
+    import_cmd.add_argument("--dry-run", action="store_true", help="Validate and report planned changes without copying files")
+    import_cmd.add_argument("--texture-format", help="Texture format name or id to write into the imported sidecar")
+    import_cmd.add_argument("--scene-pipeline", help="default, hdr, bigtex, or 0/1/2 for texture validation")
+    import_cmd.add_argument("--compression", help="Asset compression value to write into the imported sidecar")
+    import_cmd.add_argument("--base-scale", help="Model baseScale value to write into the imported sidecar")
+    import_cmd.add_argument("--gltf-bvh", action="store_true", help="Enable model BVH generation in the imported sidecar")
+    import_cmd.add_argument("--wav-force-mono", action="store_true", help="Set wavForceMono in the imported sidecar")
+    import_cmd.add_argument("--wav-resample-rate", help="Set wavResampleRate in the imported sidecar")
+    import_cmd.add_argument("--wav-compression", help="Set wavCompression in the imported sidecar")
+    import_cmd.add_argument("--role", choices=["sfx", "music", "voice", "unknown"], default="unknown", help="Audio role hint")
+    import_cmd.add_argument("--font-id", help="Set fontId in the imported sidecar")
+    import_cmd.add_argument("--font-charset", help="Set fontCharset in the imported sidecar; defaults to BF64's built-in charset")
+    import_cmd.add_argument("--exclude", action="store_true", help="Mark the imported asset sidecar as excluded from builds")
+    import_cmd.add_argument("--json", action="store_true", help="Emit stable JSON")
+    import_cmd.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
+    import_cmd.add_argument("--history-path", help="Override operation history JSONL path for --record")
+    import_cmd.set_defaults(func=cmd_import)
 
     project = sub.add_parser("project", help="Read project-level BF64 status")
     project_sub = project.add_subparsers(dest="project_command", required=True)

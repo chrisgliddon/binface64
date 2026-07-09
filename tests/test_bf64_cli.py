@@ -247,6 +247,187 @@ class Bf64CliTests(unittest.TestCase):
         skipped = [item for item in data["results"] if item["metadata"].get("skipped")]
         self.assertEqual(skipped[0]["kind"], "unknown")
 
+    def test_import_texture_creates_asset_and_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "game"
+            source = root / "crate.png"
+            self.write_minimal_project(project)
+            self.write_png_header(source, 32, 32)
+
+            proc, data = self.run_json(
+                "import",
+                str(source),
+                "--project",
+                str(project),
+                "--dest",
+                "textures/crate.png",
+                "--texture-format",
+                "RGBA16",
+                "--json",
+            )
+
+            target = project / "assets" / "textures" / "crate.png"
+            target_exists = target.exists()
+            conf = json.loads(Path(str(target) + ".conf").read_text(encoding="utf-8"))
+            show_proc, show_data = self.run_json("asset", "show", "assets/textures/crate.png", "--project", str(project), "--json")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["command"], "import")
+        self.assertEqual(data["source"]["kind"], "texture")
+        self.assertEqual(data["target"]["relative_path"], "assets/textures/crate.png")
+        self.assertTrue(target_exists)
+        self.assertEqual(conf["format"], 2)
+        self.assertEqual(conf["baseScale"], 16)
+        self.assertIsInstance(conf["uuid"], int)
+        self.assertTrue(data["validation"]["ok"])
+        self.assertEqual(show_proc.returncode, 0, show_proc.stderr)
+        self.assertTrue(show_data["ok"])
+        self.assertEqual(show_data["asset"]["out_path"], "filesystem/textures/crate.sprite")
+
+    def test_import_dry_run_does_not_write_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "game"
+            source = root / "crate.png"
+            self.write_minimal_project(project)
+            self.write_png_header(source, 32, 32)
+
+            proc, data = self.run_json(
+                "import",
+                str(source),
+                "--project",
+                str(project),
+                "--texture-format",
+                "RGBA16",
+                "--dry-run",
+                "--json",
+            )
+            target = project / "assets" / "crate.png"
+            target_exists = target.exists()
+            target_conf_exists = Path(str(target) + ".conf").exists()
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertTrue(data["dry_run"])
+        self.assertFalse(target_exists)
+        self.assertFalse(target_conf_exists)
+        self.assertEqual(data["changes"][0]["action"], "would_create")
+        self.assertFalse(data["artifacts"][0]["exists"])
+
+    def test_import_refuses_existing_asset_without_force(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "game"
+            source = root / "crate.png"
+            self.write_minimal_project(project)
+            self.write_png_header(source, 32, 32)
+            target = project / "assets" / "crate.png"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("keep me\n", encoding="utf-8")
+
+            proc, data = self.run_json(
+                "import",
+                str(source),
+                "--project",
+                str(project),
+                "--texture-format",
+                "RGBA16",
+                "--json",
+            )
+            target_content = target.read_text(encoding="utf-8")
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertFalse(data["ok"])
+        self.assertTrue(any(item["rule"] == "IMPORT_EXISTS" for item in data["issues"]))
+        self.assertEqual(target_content, "keep me\n")
+
+    def test_import_invalid_asset_fails_before_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "game"
+            source = root / "bad.bci.png"
+            self.write_minimal_project(project)
+            self.write_png_header(source, 128, 128)
+
+            proc, data = self.run_json("import", str(source), "--project", str(project), "--json")
+            target = project / "assets" / "bad.bci.png"
+            target_exists = target.exists()
+            target_conf_exists = Path(str(target) + ".conf").exists()
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertFalse(data["ok"])
+        self.assertTrue(any(item["rule"] == "T5" for item in data["issues"]))
+        self.assertFalse(target_exists)
+        self.assertFalse(target_conf_exists)
+
+    def test_import_force_overwrites_and_removes_generated_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "game"
+            source = root / "crate.png"
+            self.write_minimal_project(project)
+            self.write_png_header(source, 32, 32)
+            target = project / "assets" / "crate.png"
+            output = project / "filesystem" / "crate.sprite"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"old")
+            output.write_bytes(b"stale")
+
+            proc, data = self.run_json(
+                "import",
+                str(source),
+                "--project",
+                str(project),
+                "--texture-format",
+                "RGBA16",
+                "--force",
+                "--json",
+            )
+            target_exists = target.exists()
+            output_exists = output.exists()
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertTrue(target_exists)
+        self.assertFalse(output_exists)
+        self.assertTrue(any(item["action"] == "overwritten" for item in data["changes"]))
+        self.assertTrue(any(item["kind"] == "generated_output" for item in data["changes"]))
+
+    def test_import_records_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "game"
+            source = root / "crate.png"
+            history = root / "history.jsonl"
+            self.write_minimal_project(project)
+            self.write_png_header(source, 32, 32)
+
+            proc, data = self.run_json(
+                "import",
+                str(source),
+                "--project",
+                str(project),
+                "--texture-format",
+                "RGBA16",
+                "--record",
+                "--history-path",
+                str(history),
+                "--json",
+            )
+            rows = [json.loads(line) for line in history.read_text(encoding="utf-8").splitlines()]
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertEqual(len(rows), 1)
+        record = rows[0]
+        self.assertEqual(record["command"], "import")
+        self.assertEqual(record["path"], str(project / "assets" / "crate.png"))
+        self.assertEqual(record["project_path"], str(project))
+        self.assertTrue(any(item["kind"] == "imported_asset" for item in record["artifacts"]))
+
     def test_build_plan_empty_project_is_dry_run(self) -> None:
         proc, data = self.run_json("build", "--project", "n64/examples/empty", "--json")
         self.assertEqual(proc.returncode, 0, proc.stderr)

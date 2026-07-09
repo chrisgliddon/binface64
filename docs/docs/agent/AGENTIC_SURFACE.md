@@ -14,7 +14,7 @@ This page records the first machine-facing BF64 surface: structured N64 constrai
 |---|---|
 | `bf64` | Stable repository-local launcher for the BF64 CLI. |
 | `docs/docs/n64/limits.json` | Machine-readable version of the most important N64/BF64 limits. This is the source for validators and future MCP constraint tools. |
-| `tools/bf64.py` | No-dependency seed CLI for project creation, constraint lookup, project/scene/asset inspection, asset preflight validation, and operation history. |
+| `tools/bf64.py` | No-dependency seed CLI for project creation, asset import, constraint lookup, project/scene/asset inspection, asset preflight validation, and operation history. |
 | `.bf64/operations.jsonl` | Local, ignored audit log written by commands that support `--record`. |
 | `tests/test_bf64_cli.py` | Fixture tests for the JSON contract and core validator behavior. |
 | `.github/workflows/bf64-cli.yml` | CI job for JSON validity, CLI compilation, and unit tests. |
@@ -56,6 +56,8 @@ Inspect projects and scenes:
 ./bf64 doctor --json
 ./bf64 doctor --strict --json
 ./bf64 project status --project n64/examples/empty --json
+./bf64 import ./crate.png --project ./projects/agent_game --dest textures/crate.png --texture-format RGBA16 --json
+./bf64 import ./crate.png --project ./projects/agent_game --dry-run --json
 ./bf64 build --project n64/examples/empty --json
 ./bf64 build --project n64/examples/empty --strict-toolchain --json
 ./bf64 build --execute --project n64/examples/empty --pyrite64-binary ./pyrite64 --json
@@ -73,6 +75,7 @@ Record an operation and inspect history:
 
 ```bash
 ./bf64 new ./projects/agent_game --name "Agent Game" --record --json
+./bf64 import ./crate.png --project ./projects/agent_game --record --json
 ./bf64 project status --project n64/examples/empty --record --json
 ./bf64 build --project n64/examples/empty --record --json
 ./bf64 build --execute --project n64/examples/empty --record --json
@@ -132,7 +135,7 @@ Current records use `schema_version: 2` and include:
 - BF64 CLI version and git revision
 - path and project path when known
 - issue count, issue summary, and full issues
-- artifact paths when a command emits scaffold, build, run, or future import artifacts
+- artifact paths when a command emits scaffold, import, build, or run artifacts
 
 ---
 
@@ -149,6 +152,8 @@ Project checks include parseability, `sceneIdOnBoot` / `sceneIdOnReset` / `scene
 Scene checks include `conf` / `graph` structure, object count budget, duplicate object UUIDs, component id range, render pipeline framebuffer constraints, BigTex `doClearColor: false`, and unusual audio frequencies.
 
 `new` creates an editor-compatible starter project from `n64/examples/empty`, patches `project.p64proj`, refuses non-empty targets unless `--force` is passed, rejects project paths with spaces to match the headed editor/build launcher, ensures bootstrap files such as `assets/p64/font.ia4.png`, validates the generated project, and records scaffold artifacts in history.
+
+`import` copies one supported editor asset into `assets/`, writes a fresh `.conf` sidecar with a new UUID, validates before mutating, refuses target overwrites unless `--force` is passed, supports `--dry-run`, removes stale generated output for overwritten assets, and records imported asset/sidecar artifacts in history. Current supported imports are `.png`, `.glb`, `.gltf`, `.wav`, `.mp3`, `.xm`, and `.ttf`.
 
 `project status` combines project config, full scene validation, asset inventory counts, `doctor` toolchain checks, and suggested next actions. It is the first command agents should call when entering an unknown BF64 project.
 
@@ -168,7 +173,7 @@ Known limits:
 
 - This is preflight validation. The tiny3d importer, mksprite, audioconv64, and a real ROM build remain the source of truth for deep pipeline assertions.
 - The model validator cannot prove the optimized retained-animation keyframe delta stays below 32768 ticks without running the tiny3d importer.
-- The validator does not yet import assets, mutate scenes, or validate prefab/node-graph internals.
+- The validator does not yet mutate scenes or validate prefab/node-graph internals.
 - `doctor` distinguishes default warnings from `--strict` environment errors. Missing N64 toolchain pieces do not block asset/scene validation.
 
 ---
@@ -185,8 +190,7 @@ Known limits:
 
 ## Expansion Backlog
 
-- Add `import`.
 - Wrap `tools/bf64.py` from the Phase 6 MCP server instead of duplicating validation logic.
 - Expand structured scene/project schemas and preserve JSON compatibility with tests.
-- Extend artifact capture for future import commands.
+- Add dedicated prefab and node-graph validators before allowing headless import for those asset kinds.
 - Decide whether duplicate scene UUID repair should be an explicit CLI command or only an editor action.
