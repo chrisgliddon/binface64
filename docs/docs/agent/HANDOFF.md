@@ -2,8 +2,8 @@
 
 **Repo:** `https://github.com/chrisgliddon/binface64` (fork of `HailToDodongo/pyrite64`)
 **Current branch:** `main`
-**Last session:** Phase 2 — Asset Requirements & Limitations Research (2026-07-07)
-**Next session:** Phase 3 — `/skills` Scaffold + Core Engine Skills
+**Last session:** Agentic surface seed from Mixar lessons (2026-07-09)
+**Next session:** Phase 3 — `/skills` Scaffold + Core Engine Skills, unless priorities shift to hardening the seed `bf64` CLI
 
 This is the **only** memory between sessions. Read it first. Update it before ending a session.
 
@@ -26,7 +26,7 @@ This is the **only** memory between sessions. Read it first. Update it before en
 | 2 | Asset requirements & limitations | ✅ Done | (this session) | ~moderate | 5 docs in docs/docs/n64/: textures, models-and-meshes, audio-assets, rom-budgets, asset-checklist. n64.rst toctree updated. 3 parallel explore subagents over vendored tiny3d gltf_importer, libdragon audioconv64/mixer, mksprite/rdpq_tex/BCI. Both Phase 0 open questions #8 (glTF material set) and #9 (audioconv64 .mp3) resolved. Sphinx build verified (3 pre-existing warnings, none new). |
 | 3 | `/skills` scaffold + core engine skills | ⬜ Not started | — | ~300K est | Next session. See kickoff prompt in `phased-plan.md` Phase 3. |
 | 4 | Asset & content pipeline skills | ⬜ Not started | — | ~300K est | |
-| 5 | `bf64` CLI | ⬜ Not started | — | ~400K est | |
+| 5 | `bf64` CLI | 🌱 Seeded | — | ~400K est | Out-of-order seed: `docs/docs/n64/limits.json`, `tools/bf64.py`, `docs/docs/agent/AGENTIC_SURFACE.md`. Not the full Phase 5 CLI yet. |
 | 6 | MCP server | ⬜ Not started | — | ~400K est | |
 | 7 | Extensions system | ⬜ Not started | — | ~400K est (splittable 7a/7b) | |
 | 8 | CONTRIBUTING.md, vision, agent onboarding | ⬜ Not started | — | ~250K est | |
@@ -37,6 +37,50 @@ This is the **only** memory between sessions. Read it first. Update it before en
 - All N64 technical claims cite `docs/docs/n64/`; all API claims are verified against source.
 - Upstream Pyrite64 credits stay intact; divergence is tracked in `docs/docs/agent/DIVERGENCE.md`.
 - Every new capability ships with a matching skill in `/skills`.
+
+---
+
+## What this session (agentic surface seed) completed
+
+This session applied lessons from reviewing Mixar's agentic-fork approach without installing/building it locally. The goal was a low-risk BF64 seed that makes N64 constraints and validation usable by both humans and agents before the full Phase 5 CLI/MCP work.
+
+### Files created
+
+| File | Purpose |
+|---|---|
+| `docs/docs/n64/limits.json` | Machine-readable N64/BF64 limits for texture, model, audio, scene, and ROM constraints. Intended as the backing data for CLI and future MCP constraint tools. |
+| `tools/bf64.py` | No-dependency seed CLI with `constraints`, `validate`, and `history` commands. Emits stable JSON, deterministic exit codes, and actionable rule/fix/source issues. |
+| `docs/docs/agent/AGENTIC_SURFACE.md` | Design and usage notes for the current agentic surface, including JSON contract, examples, limits, and expansion backlog. |
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `docs/docs/agent.rst` | Added `agent/AGENTIC_SURFACE` to the Sphinx toctree. |
+| `docs/docs/n64/asset-checklist.md` | Added pointer to `limits.json` and `tools/bf64.py validate`. Clarified BCI, animation, and XM rules. |
+| `docs/docs/n64/audio.md` | Removed the stale MP3 uncertainty; MP3 uses the WAV conversion path and accepts `--wav-*` flags. |
+| `docs/docs/n64/rom-budgets.md` | Corrected BCI_256 ROM math: BF64 256x256 BCI files are 64 KiB, 1 B/pixel on disk. |
+| `docs/docs/n64/textures.md` | Clarified CI alpha handling in BF64/mksprite and BCI_256 ROM byte cost. |
+| `.gitignore` | Ignored `.bf64/` local operation history. |
+
+### Seed CLI behavior
+
+- `python3 tools/bf64.py constraints list --json`
+- `python3 tools/bf64.py constraints texture --json`
+- `python3 tools/bf64.py validate <asset> --json`
+- `python3 tools/bf64.py validate <asset> --record --json`
+- `python3 tools/bf64.py history list --json`
+
+The validator currently covers PNG texture preflight, glTF/GLB model preflight, WAV/MP3/XM audio preflight, and font extension checks. It is intentionally scoped: importer/build tools remain the source of truth for deep pipeline assertions.
+
+### Follow-up for the real Phase 5 CLI
+
+- Promote or wrap `tools/bf64.py` as the formal `bf64` entry point.
+- Add `doctor`, `new`, `build`, `run`, `import`, `scene ls`, and `scene show`.
+- Add fixture-based tests that lock the JSON schema and common validator results.
+- Add exit code 2 for toolchain/environment failures.
+- Add repo revision, command argv, operation ids, and tool version to `.bf64/operations.jsonl`.
+- Make the Phase 6 MCP server wrap the CLI rather than duplicating validation logic.
 
 ---
 
@@ -196,7 +240,7 @@ See ARCHITECTURE.md §5 for the full Gotchas index (~40 items).
 
 **Before starting:**
 1. Submodules are checked out. The vendored libdragon/tiny3d source is available.
-2. Read this file, then `ARCHITECTURE.md` (full — especially §1.7 node graphs, §2 runtime, §3 asset pipeline), then `CODEMAP.md`, then the `docs/docs/n64/` compendium (all 11 docs: hardware, performance-budgets, libdragon-tiny3d, display-and-video, audio, emulation-and-hardware-testing, textures, models-and-meshes, audio-assets, rom-budgets, asset-checklist). The n64/ docs are the ground truth that skills will cite.
+2. Read this file, then `docs/docs/agent/AGENTIC_SURFACE.md`, then `ARCHITECTURE.md` (full — especially §1.7 node graphs, §2 runtime, §3 asset pipeline), then `CODEMAP.md`, then the `docs/docs/n64/` compendium (all 11 docs plus `limits.json`: hardware, performance-budgets, libdragon-tiny3d, display-and-video, audio, emulation-and-hardware-testing, textures, models-and-meshes, audio-assets, rom-budgets, asset-checklist). The n64/ docs are the ground truth that skills will cite.
 3. Optionally read `vendored/tiny3d/docs/{modelFormat,modelOpt,fast64Settings}.md` and the example games in `n64/examples/` for concrete patterns.
 
 **Outputs (per phased-plan.md):**

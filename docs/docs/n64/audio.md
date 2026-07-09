@@ -78,7 +78,7 @@ Arkos Tracker II .YM → .YM64 (`audioconv64.cpp:71`, `src/audio/ym64.c`).
 - YM → YM64: `--ym-compress <true|false>`.
 - VADPCM detail: `vadpcm,bits=<2|3|4>` (default 4), `vadpcm,huffman=true|false` (default true for wav64, false for xm64).
 
-**GOTCHA:** `audioconv64` is invoked with the same flags for both AUDIO types but the wav-* flags are only added when `asset.type == AUDIO` (`audioBuilder.cpp:33-43`); an `.mp3` typed as AUDIO will pass `--wav-*` flags to `audioconv64` which may or may not accept them for mp3 input — undocumented.
+**GOTCHA:** `audioconv64` accepts `--wav-*` flags for both WAV and MP3 input. MP3 is decoded into the same waveform pipeline as WAV, but it has no native loop/cue metadata; pass `--wav-loop*` / `--wav-seek` explicitly if needed. See `audio-assets.md` §3 for the full MP3 answer.
 
 ---
 

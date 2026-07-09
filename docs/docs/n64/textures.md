@@ -109,8 +109,8 @@ BF64's `AssetConf.format` uses a separate 0-based enum that serializes into the 
 | RGBA32 | 32 | 4 | — | 8-bit RGB | 8-bit | Avoid on N64 — uses 2 KB TMEM only; rare |
 | RGBA16 | 16 | 2 | — | 5-bit RGB | 1-bit | Default for color textures needing alpha |
 | YUV16 | 16 | 2 | — | YUYV 4:2:2 | none | Video / YUV blit mode only; not for game textures |
-| CI8 | 8 | 1 | 256-color TLUT (2048 B in TMEM) | 5 or 8 bit | 1 or 8 bit | Best for photographic color textures |
-| CI4 | 4 | ½ | 16-color TLUT (per-tile palette 0–15) | 5 or 8 bit | 1 or 8 bit | Best for small color palettes (16 colors) |
+| CI8 | 8 | 1 | 256-color TLUT (2048 B in TMEM) | 5-bit RGB in output palette | treated opaque by BF64/mksprite | Best for photographic color textures |
+| CI4 | 4 | ½ | 16-color TLUT (per-tile palette 0–15) | 5-bit RGB in output palette | treated opaque by BF64/mksprite | Best for small color palettes (16 colors) |
 | IA16 | 16 | 2 | — | 8-bit intensity | 8-bit alpha | Gradients, smooth-height maps, font glyphs |
 | IA8 | 8 | 1 | — | 4-bit intensity | 4-bit alpha | UI with low-bit alpha |
 | IA4 | 4 | ½ | — | 3-bit intensity | 1-bit alpha | Tiny UI / bitmask |
@@ -118,7 +118,7 @@ BF64's `AssetConf.format` uses a separate 0-based enum that serializes into the 
 | I4 | 4 | ½ | — | 4-bit intensity | (alpha = intensity) | Tiny greyscale / lightmap |
 | IHQ | — | — | — | I4 detail + RGBA16 main | mixed | "Fakes doubling TMEM" via subtractive detail blend (`mksprite.c:967-972`) |
 | SHQ | — | — | — | I4 mipmap + RGBA16 | mixed | High-quality mipmap variant; very rare |
-| BCI_256 | ~0.75 effective | — | 4 colors per 4×4 block | 5-bit RGB (RGBA5551) | 1-bit | BigTex streaming pipeline only — see §7 |
+| BCI_256 | 1 ROM byte/pixel | — | 4 colors per 4×4 block | 5-bit RGB (RGBA5551) | 1-bit | BigTex streaming pipeline only — see §7 |
 
 **GOTCHA (hardware):** RGBA32, CI4, CI8, YUV16 only get **2 KB of usable TMEM** because their data lives in TMEM's upper half / split / palette-aliased. The 2 KB restriction is hard-coded in four places in `rdpq_tex.c:188,365,381,410-411`. RGBA16, IA16, IA8, IA4, I8, I4 get the full 4 KB.
 

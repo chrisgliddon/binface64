@@ -209,7 +209,7 @@ A small 3D game targeting 8 MiB (the smallest practical cart for a 3D game). Bas
 | Switch RGBA16 textures to CI8 | 50% smaller (if ≤256 colors) |
 | Switch CI8 to CI4 | 50% smaller (if ≤16 colors) |
 | Use I8/I4 for greyscale | 50-75% smaller than RGBA16 |
-| Use BCI_256 + BigTex for large textures | 0.75 B/pixel effective vs 2 B/texel RGBA16 (but requires Expansion Pak + 320×240 RGBA16 lock) |
+| Use BCI_256 + BigTex for large textures | 1 B/pixel ROM cost (16 B per 4×4 block; 12 B payload = 0.75 B/pixel core data) vs 2 B/texel RGBA16 (but requires Expansion Pak + 320×240 RGBA16 lock) |
 | Compress .t3dm with mkasset -c 2 (APLib) | ~10-20% smaller than LZ4 |
 | Compress .t3dm with mkasset -c 3 (Shrinkler) | ~20-40% smaller than LZ4 (slower decompress) |
 
@@ -227,7 +227,7 @@ jam25 is a complete 3D platformer. Its asset footprint (source files):
 | TTF fonts (1 file) | 2,761,016 | 2.63 |
 | **Total source** | **20,184,580** | **19.25** |
 
-The converted `filesystem/` is smaller after compression (BCI 0.75 B/px vs PNG, vadpcm 4-bit vs WAV, mkasset LZ4 on .t3dm). The TTF converts to a much smaller `.font64` (only the glyphs used). The MP3s decode to larger vadpcm wav64s.
+The converted `filesystem/` is smaller after compression (BCI is 1 B/px on disk vs much larger source PNGs, vadpcm 4-bit vs WAV, mkasset LZ4 on .t3dm). The TTF converts to a much smaller `.font64` (only the glyphs used). The MP3s decode to larger vadpcm wav64s.
 
 **Estimated converted ROM size:** ~22-28 MiB (the music dominates — 4 tracks × ~4 MiB vadpcm each). jam25 would target a 32 MiB cart.
 
@@ -280,7 +280,7 @@ Quick reference for estimating an asset's ROM footprint:
 | IA16 / RGBA16 | W×H×2 | 2 KiB | 8 KiB |
 | IA8 / I8 | W×H×1 | 1 KiB | 4 KiB |
 | IA4 / I4 | W×H×0.5 | 0.5 KiB | 2 KiB |
-| BCI_256 | (W/4)×(H/4)×16 | 2 KiB (32×32) | 16 KiB (64×64) / 64 KiB (256×256) |
+| BCI_256 | (W/4)×(H/4)×16 | 1 KiB (32×32) | 4 KiB (64×64) / 64 KiB (256×256) |
 | Mipmap chain | base × 1.333 | +0.67 KiB | +2.67 KiB |
 | LZ4 compression (asset API) | ~50-70% of raw | | |
 | APLib | ~40-60% of raw | | |
@@ -332,7 +332,7 @@ Quick reference for estimating an asset's ROM footprint:
 5. **RDRAM is independent of ROM size.** A 64 MiB ROM still only has 4-8 MiB RDRAM. Static allocations (framebuffers + audio + code) eat ~1.4 MiB, leaving ~3.5 MiB heap on 4 MiB systems. Detect `is_memory_expanded()` before assuming 8 MiB.
 6. **BigTex costs 1.125 MiB RDRAM** (18 × 256×256 BCI textures at fixed 0x80400000). Expansion Pak required. Framebuffers placed above 0x80500000.
 7. **Texture format choice dominates ROM cost.** RGBA16 = 2 B/texel; CI8 = 1 B/texel + 512 B palette; CI4 = 0.5 B/texel + 32 B palette. A 64×64 RGBA16 = 8 KiB; the same as CI4 = 2 KiB (4× savings). Use AUTO format and let mksprite downgrade.
-8. **BCI_256 is 0.75 B/pixel effective** (16 B per 4×4 block). Better than RGBA16 (2 B/px) for the BigTex pipeline; worse than CI4 (0.5 B/px) but supports 4 colors per block vs 16 global.
+8. **BCI_256 is 1 B/pixel in ROM** (16 B per 4×4 block). The color payload is 12 B per block (0.75 B/pixel), but ROM budgets must count the full 16 B. Better than RGBA16 (2 B/px) for the BigTex pipeline; worse than CI4 (0.5 B/px) but supports 4 colors per block vs 16 global.
 9. **Audio sample rate halves ROM.** 22050 Hz = 31% smaller than 32000; 32000 = 27% smaller than 44100. Use 22050 for SFX if you need space. 32000 is the BF64 canonical rate.
 10. **Mono SFX halves ROM and channel pressure.** jam25 sets `wavForceMono: true` on every SFX. Stereo music is fine; stereo SFX is wasteful.
 11. **`n64tool --size` pads to a declared size.** Use it to declare a target cart size (e.g. `--size 8M`). If unset, no padding. The 64drive warns if size is not a multiple of 512 bytes.

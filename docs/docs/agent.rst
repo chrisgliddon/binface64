@@ -14,3 +14,4 @@ how sessions hand off context to one another.
   agent/CODEMAP
   agent/HANDOFF
   agent/DIVERGENCE
+  agent/AGENTIC_SURFACE

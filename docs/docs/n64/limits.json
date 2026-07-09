@@ -1,0 +1,298 @@
+{
+  "schema_version": 1,
+  "reviewed": "2026-07-09",
+  "description": "Machine-readable BF64/N64 asset limits derived from docs/docs/n64/*.md. Human-facing rationale stays in the Markdown docs; tools should query this file for exact numbers.",
+  "sources": {
+    "texture_formats": "docs/docs/n64/textures.md",
+    "model_formats": "docs/docs/n64/models-and-meshes.md",
+    "audio_formats": "docs/docs/n64/audio-assets.md",
+    "rom_budgets": "docs/docs/n64/rom-budgets.md",
+    "checklist": "docs/docs/n64/asset-checklist.md"
+  },
+  "exit_codes": {
+    "ok": 0,
+    "user_or_asset_error": 1,
+    "environment_error": 2,
+    "internal_error": 3
+  },
+  "texture": {
+    "accepted_extensions": [".png"],
+    "format_ids": {
+      "AUTO": 0,
+      "RGBA32": 1,
+      "RGBA16": 2,
+      "CI8": 3,
+      "CI4": 4,
+      "I8": 5,
+      "I4": 6,
+      "IA16": 7,
+      "IA8": 8,
+      "IA4": 9,
+      "IHQ": 10,
+      "SHQ": 11,
+      "ZBUF": 12,
+      "BCI_256": 13
+    },
+    "formats": {
+      "RGBA32": {
+        "bytes_per_texel": 4,
+        "usable_tmem_bytes": 2048,
+        "max_texels": 1024,
+        "max_square": 32,
+        "alpha": "8-bit"
+      },
+      "RGBA16": {
+        "bytes_per_texel": 2,
+        "usable_tmem_bytes": 4096,
+        "max_texels": 2048,
+        "max_square": 44,
+        "alpha": "1-bit"
+      },
+      "CI8": {
+        "bytes_per_texel": 1,
+        "palette_tmem_bytes": 2048,
+        "usable_tmem_bytes": 2048,
+        "max_texels": 2048,
+        "max_square": 42,
+        "max_palette_colors": 256,
+        "alpha": "treated opaque by BF64/mksprite"
+      },
+      "CI4": {
+        "bytes_per_texel": 0.5,
+        "palette_tmem_bytes": 2048,
+        "rom_palette_bytes": 32,
+        "usable_tmem_bytes": 2048,
+        "max_texels": 4096,
+        "max_square": 64,
+        "max_palette_colors": 16,
+        "alpha": "treated opaque by BF64/mksprite"
+      },
+      "IA16": {
+        "bytes_per_texel": 2,
+        "usable_tmem_bytes": 4096,
+        "max_texels": 2048,
+        "max_square": 44,
+        "alpha": "8-bit"
+      },
+      "IA8": {
+        "bytes_per_texel": 1,
+        "usable_tmem_bytes": 4096,
+        "max_texels": 4096,
+        "max_square": 64,
+        "alpha": "4-bit"
+      },
+      "IA4": {
+        "bytes_per_texel": 0.5,
+        "usable_tmem_bytes": 4096,
+        "max_texels": 8192,
+        "max_square": 85,
+        "alpha": "1-bit"
+      },
+      "I8": {
+        "bytes_per_texel": 1,
+        "usable_tmem_bytes": 4096,
+        "max_texels": 4096,
+        "max_square": 64,
+        "alpha": "alpha = intensity"
+      },
+      "I4": {
+        "bytes_per_texel": 0.5,
+        "usable_tmem_bytes": 4096,
+        "max_texels": 8192,
+        "max_square": 85,
+        "alpha": "alpha = intensity"
+      },
+      "BCI_256": {
+        "bytes_per_block_4x4": 16,
+        "payload_bytes_per_block_4x4": 12,
+        "rom_bytes_per_pixel": 1,
+        "payload_bytes_per_pixel": 0.75,
+        "bf64_required_width": 256,
+        "bf64_required_height": 256,
+        "pool_slots": 18,
+        "pool_bytes": 1179648,
+        "requires_render_pipeline": 2,
+        "requires_expansion_pak": true
+      }
+    },
+    "compression_values": {
+      "0": "DEFAULT, converted to mksprite level 1",
+      "1": "LZ4",
+      "2": "APLib",
+      "3": "Shrinkler"
+    },
+    "rules": [
+      {
+        "id": "T1",
+        "severity": "error",
+        "summary": "Texture assets must be PNG files."
+      },
+      {
+        "id": "T3",
+        "severity": "error",
+        "summary": "Non-BigTex textures must fit the chosen format's TMEM texel budget."
+      },
+      {
+        "id": "T5",
+        "severity": "error",
+        "summary": ".bci.png is BF64 BigTex-only and must be exactly 256x256."
+      },
+      {
+        "id": "T6",
+        "severity": "error",
+        "summary": ".bci.png requires scene renderPipeline 2 when scene context is known."
+      },
+      {
+        "id": "T8",
+        "severity": "error",
+        "summary": "Texture compression config must be 0, 1, 2, or 3."
+      },
+      {
+        "id": "T9",
+        "severity": "error",
+        "summary": "Textures larger than 256x256 must use BigTex."
+      }
+    ]
+  },
+  "model": {
+    "accepted_extensions": [".glb", ".gltf"],
+    "max_vertices_per_file": 65535,
+    "max_indices_per_file": 65535,
+    "rsp_vertex_cache": 70,
+    "max_strip_indices": 255,
+    "max_animation_ticks": 65535,
+    "animation_tick_rate": 60,
+    "max_animation_seconds": 1092.25,
+    "max_keyframe_delta_ticks": 32767,
+    "allowed_animation_targets": ["translation", "rotation", "scale"],
+    "rules": [
+      {
+        "id": "M1",
+        "severity": "error",
+        "summary": "Model assets must be .glb or .gltf."
+      },
+      {
+        "id": "M3",
+        "severity": "error",
+        "summary": "Every material should carry Fast64 f3d_mat extras."
+      },
+      {
+        "id": "M4",
+        "severity": "error",
+        "summary": "Total vertices and indices per model file must each be <=65535."
+      },
+      {
+        "id": "M5",
+        "severity": "warning",
+        "summary": "Multiple skin weights are discarded; BF64/tiny3d uses one bone influence."
+      },
+      {
+        "id": "M7",
+        "severity": "error",
+        "summary": "Animation channels may only target translation, rotation, or scale."
+      },
+      {
+        "id": "M8",
+        "severity": "error",
+        "summary": "Animation duration must fit u16 ticks and retained keyframe deltas must stay below 32768 ticks."
+      }
+    ]
+  },
+  "audio": {
+    "editor_accepted_extensions": [".wav", ".mp3", ".xm"],
+    "manual_only_extensions": [".aiff", ".ym"],
+    "unsupported_editor_extensions": [".it", ".s3m", ".mod"],
+    "wav_compression_values": {
+      "0": "raw PCM",
+      "1": "VADPCM",
+      "3": "Opus"
+    },
+    "wav_resample_ui_values": [0, 8000, 11025, 16000, 22050, 32000, 44100],
+    "wav_resample_cli_max": 48000,
+    "opus_required_sample_rate": 48000,
+    "mixer_channels": 32,
+    "canonical_sample_rate": 32000,
+    "bytes_per_second": {
+      "raw_16_mono_32000": 65536,
+      "raw_16_stereo_32000": 131072,
+      "vadpcm4_mono_32000": 18432,
+      "vadpcm4_stereo_32000": 36864,
+      "vadpcm2_mono_32000": 9216,
+      "opus_mono_48000": 6554,
+      "opus_stereo_48000": 12698
+    },
+    "xm": {
+      "max_channels": 32,
+      "opus_supported": false
+    },
+    "rules": [
+      {
+        "id": "A1",
+        "severity": "error",
+        "summary": "BF64 editor accepts .wav, .mp3, and .xm audio assets."
+      },
+      {
+        "id": "A2",
+        "severity": "error",
+        "summary": "wavCompression must be 0, 1, or 3."
+      },
+      {
+        "id": "A3",
+        "severity": "warning",
+        "summary": "48000 Hz is accepted by audioconv64 but not offered by the BF64 UI dropdown."
+      },
+      {
+        "id": "A4",
+        "severity": "warning",
+        "summary": "Opus forces 48000 Hz; non-48000 resample values become bitrate hints."
+      },
+      {
+        "id": "A8",
+        "severity": "error",
+        "summary": "XM modules must have <=32 channels."
+      }
+    ]
+  },
+  "scene": {
+    "max_objects": 65534,
+    "pipelines": {
+      "0": {
+        "name": "Default",
+        "fb_formats": [0, 1]
+      },
+      "1": {
+        "name": "HDR+Bloom",
+        "fb_width": 320,
+        "fb_height": 240,
+        "fb_format": 0
+      },
+      "2": {
+        "name": "BigTex",
+        "fb_width": 320,
+        "fb_height": 240,
+        "fb_format": 0,
+        "do_clear_color": false,
+        "requires_expansion_pak": true
+      }
+    }
+  },
+  "rom": {
+    "target_cart_mib": [8, 16, 32, 64],
+    "rom_size_alignment_bytes": 512,
+    "rompak_max_entries": 15,
+    "dfs_compression": false,
+    "asset_compression_values": {
+      "0": "none/default at editor layer",
+      "1": "LZ4",
+      "2": "APLib",
+      "3": "Shrinkler"
+    },
+    "rdram": {
+      "base_bytes": 4194304,
+      "expansion_pak_bytes": 8388608,
+      "approx_static_bytes": 1468006,
+      "approx_base_heap_bytes": 3670016,
+      "approx_expansion_heap_bytes": 7864320
+    }
+  }
+}

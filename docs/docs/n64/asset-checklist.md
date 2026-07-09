@@ -11,6 +11,8 @@ For each asset, run the rules in its section. If ANY rule fails, fix the asset b
 
 **Rule format:** `PASS if <condition>; FAIL otherwise. Source: <doc> §<section>.`
 
+**Machine-readable companion:** `docs/docs/n64/limits.json` captures the core limits for tools. For a first-pass preflight, run `python3 tools/bf64.py validate <asset> --json` from the repo root.
+
 ---
 
 ## Textures (.png)
@@ -21,7 +23,7 @@ For each asset, run the rules in its section. If ANY rule fails, fix the asset b
 | T2 | PASS if pixel dimensions are power-of-two OR the format is non-CI (rdpq handles non-POT for RGBA/IA, but POT is safest). FAIL if non-POT and CI4/CI8. | `textures.md` §3 |
 | T3 | PASS if dimensions fit TMEM for the chosen format (see table below). FAIL otherwise — the ROM will assert at draw time. | `textures.md` §3.2 |
 | T4 | PASS if the conf `format` is 0 (AUTO) OR explicitly matches the texture's color count. FAIL if RGBA16 forced on a ≤256-color texture (wastes 4× ROM/TMEM). | `textures.md` §2.4, §4.3 |
-| T5 | PASS if `.bci.png` extension is used ONLY for BigTex-pipeline 256×256 textures. FAIL if `.bci.png` on a non-256×256 texture (BCI requires 4×4 block alignment → W and H must be multiples of 4). | `textures.md` §7, §1.2 |
+| T5 | PASS if `.bci.png` extension is used ONLY for BigTex-pipeline textures that are exactly 256×256 in BF64. FAIL if `.bci.png` on any other size. The BCI converter itself is 4×4-block based, but the BF64 BigTex pool/runtime path is 256×256. | `textures.md` §7, §1.2 |
 | T6 | PASS if `.bci.png` and the scene uses `renderPipeline: 2` (BigTex). FAIL if `.bci.png` but the scene uses Default or HDR+Bloom pipeline (BCI_256 textures only work in BigTex). | `textures.md` §7.3 |
 | T7 | PASS if palette color count ≤ 16 for CI4, ≤ 256 for CI8. FAIL otherwise (mksprite will re-quantize, which is fine, but you should have used the bigger format). | `textures.md` §4.3 |
 | T8 | PASS if `compression` conf is 0 (DEFAULT), 1, 2, or 3. FAIL on other values. Note: DEFAULT (0) becomes mksprite level 1 internally. | `textures.md` §1.3 |
@@ -55,7 +57,7 @@ For each asset, run the rules in its section. If ANY rule fails, fix the asset b
 | M5 | PASS if every vertex has at most 1 bone influence (rigid skinning). WARN if vertices have >1 bone influence (glTF weights are read and discarded — only `joints[0]` is used). | `models-and-meshes.md` §3.1, §9.3 |
 | M6 | PASS if the armature root has no transformed ancestors (translation/rotation/scale all identity within epsilon 0.0001). FAIL if armature is parented to a transformed node (importer throws). | `models-and-meshes.md` §3.2, §9.2 |
 | M7 | PASS if animations use only translation, rotation, or scale channels. FAIL if any animation uses `weights` morph targets (importer throws "Unknown animation target"). | `models-and-meshes.md` §6.1, §9.4 |
-| M8 | PASS if animation duration ≤ 18.2 minutes (65535 ticks @ 60 Hz). FAIL otherwise (u16 time cap, writer asserts `timeNext < 2^15`). | `models-and-meshes.md` §6.4 |
+| M8 | PASS if animation duration ≤ 18.2 minutes (65535 ticks @ 60 Hz) AND no retained keyframe gap is ≥32768 ticks. FAIL otherwise (`time_to_ticks` stores u16 absolute time, and `writer.cpp` asserts `timeNext < 2^15` for each keyframe delta). | `models-and-meshes.md` §6.4 |
 | M9 | PASS if `baseScale` conf is set such that the model's bounding box fits in ±32767/globalScale Blender units. FAIL if any vertex position would exceed int16 range. | `models-and-meshes.md` §2.4 |
 | M10 | PASS if textures referenced by glTF materials are already imported as PNG assets in the project. WARN if missing — `getByPath` fails silently and the material loses its texture binding. | `models-and-meshes.md` §9.6, `ARCHITECTURE.md` §3.3 |
 | M11 | PASS if `gltfBVH` conf is true only if you want frustum culling. WARN if false on a large scene (no culling, but smaller .t3dm). | `models-and-meshes.md` §7.7 |
@@ -74,7 +76,7 @@ For each asset, run the rules in its section. If ANY rule fails, fix the asset b
 | A3 | PASS if `wavResampleRate` is 0, 8000, 11025, 16000, 22050, 32000, or 44100. WARN if 48000 (not in BF64 UI dropdown but accepted by audioconv64; mandatory for opus). | `audio-assets.md` §4.1 |
 | A4 | PASS if `wavCompression: 3` (opus) AND `wavResampleRate: 0` or 48000. WARN if opus + a non-48000 resample rate (audioconv64 forces 48000 internally anyway; the resample value becomes a bitrate hint). | `audio-assets.md` §4.5 |
 | A5 | PASS if `wavForceMono: true` for SFX. WARN if `wavForceMono: false` on a SFX (stereo SFX doubles ROM and channel pressure). | `audio-assets.md` §5.4, Implications #4 |
-| A6 | PASS if the asset is `.xm` and `wavCompression` is NOT 3 (opus forbidden for XM64 — audioconv64 hard errors). FAIL if `.xm` + `wavCompression: 3`. | `audio-assets.md` §6.4, Hard limits |
+| A6 | PASS if `.xm` assets rely on BF64's editor defaults (BF64 does not pass `wavCompression` / `--wav-*` flags to MUSIC_XM). FAIL only for manual `audioconv64 --xm-compress` usage that requests opus; XM64 supports raw or VADPCM samples, not opus. | `audio-assets.md` §2.5, §6.4 |
 | A7 | PASS if estimated playback channels fit the 32-channel mixer. Compute: sum of (channels per source) for all simultaneously-playing sources ≤ 32. WARN if approaching 32. FAIL if >32 (runtime assert for XM, error log for WAV). | `audio-assets.md` §5.3, §7.7, Implications #5 |
 | A8 | PASS if `.xm` module has ≤32 channels (the runtime assert `first_ch + num_channels ≤ 32`). FAIL if >32 channels. | `audio-assets.md` §7.7 |
 | A9 | PASS if `.xm` module does not use ping-pong loops (unrolled to forward at convert time; RSP only does forward loops). WARN if ping-pong loops present (will be unrolled, increasing ROM size). | `audio-assets.md` §7.3, Implications #6 |
