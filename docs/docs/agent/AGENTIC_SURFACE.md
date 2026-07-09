@@ -58,6 +58,8 @@ Inspect projects and scenes:
 ./bf64 build --project n64/examples/empty --json
 ./bf64 build --project n64/examples/empty --strict-toolchain --json
 ./bf64 build --execute --project n64/examples/empty --pyrite64-binary ./pyrite64 --json
+./bf64 run --project n64/examples/empty --json
+./bf64 run --build --project n64/examples/empty --pyrite64-binary ./pyrite64 --emulator ares --json
 ./bf64 asset ls --project n64/examples/empty --json
 ./bf64 asset show assets/crate32.png --project n64/examples/empty --json
 ./bf64 asset validate-all --project n64/examples/empty --json
@@ -72,6 +74,7 @@ Record an operation and inspect history:
 ./bf64 project status --project n64/examples/empty --record --json
 ./bf64 build --project n64/examples/empty --record --json
 ./bf64 build --execute --project n64/examples/empty --record --json
+./bf64 run --project n64/examples/empty --record --json
 ./bf64 asset validate-all --project n64/examples/empty --record --json
 ./bf64 validate n64/examples/jam25/assets/PlayerJump00.wav --role sfx --record --json
 ./bf64 history list --json
@@ -109,7 +112,7 @@ Exit codes:
 |---|---|
 | 0 | Success. No validation errors. |
 | 1 | User or asset error. Output includes actionable issues. |
-| 2 | Environment/toolchain error. Currently used by `doctor --strict`, `build --strict-toolchain`, and `build --execute` preflight/binary resolution. |
+| 2 | Environment/toolchain error. Currently used by `doctor --strict`, `build --strict-toolchain`, `build --execute` preflight/binary resolution, and missing `run` emulator commands. |
 | 3 | Internal tooling error. |
 | 130 | Interrupted. |
 
@@ -155,11 +158,13 @@ Scene checks include `conf` / `graph` structure, object count budget, duplicate 
 
 `build --execute` runs strict preflight first, resolves `./pyrite64` / `./pyrite64.exe` or an explicit `--pyrite64-binary`, then invokes the existing C++ CLI path: `<pyrite64-binary> --cli --cmd build <project.p64proj>`. It captures stdout/stderr tails, underlying return code, duration, and refreshed artifact existence in JSON/history.
 
+`run` locates the expected `<romName>.z64`, uses project `pathEmu` by default, accepts `--emulator <command>` overrides, appends the ROM path to the emulator argv, and captures stdout/stderr tails, return code, duration, and ROM artifact metadata. `run --build` executes `build --execute` first, then launches the ROM if the build succeeds.
+
 Known limits:
 
 - This is preflight validation. The tiny3d importer, mksprite, audioconv64, and a real ROM build remain the source of truth for deep pipeline assertions.
 - The model validator cannot prove the optimized retained-animation keyframe delta stays below 32768 ticks without running the tiny3d importer.
-- The validator does not yet import assets, mutate scenes, validate prefab/node-graph internals, or launch emulators.
+- The validator does not yet import assets, mutate scenes, or validate prefab/node-graph internals.
 - `doctor` distinguishes default warnings from `--strict` environment errors. Missing N64 toolchain pieces do not block asset/scene validation.
 
 ---
@@ -176,8 +181,8 @@ Known limits:
 
 ## Expansion Backlog
 
-- Add `run`, then `new`, and `import`.
+- Add `new`, then `import`.
 - Wrap `tools/bf64.py` from the Phase 6 MCP server instead of duplicating validation logic.
 - Expand structured scene/project schemas and preserve JSON compatibility with tests.
-- Extend artifact capture for future run/import commands.
+- Extend artifact capture for future import commands.
 - Decide whether duplicate scene UUID repair should be an explicit CLI command or only an editor action.

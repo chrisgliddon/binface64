@@ -76,6 +76,19 @@ class Bf64CliTests(unittest.TestCase):
         )
         binary.chmod(0o755)
 
+    def write_fake_emulator(self, binary: Path, log_path: Path, returncode: int = 0) -> None:
+        binary.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json\n"
+            "import sys\n"
+            "from pathlib import Path\n"
+            f"Path({json.dumps(str(log_path))}).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n"
+            "print('fake emulator ok')\n"
+            f"raise SystemExit({returncode})\n",
+            encoding="utf-8",
+        )
+        binary.chmod(0o755)
+
     def test_constraints_list_json(self) -> None:
         proc, data = self.run_json("constraints", "list", "--json")
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -206,6 +219,86 @@ class Bf64CliTests(unittest.TestCase):
         self.assertFalse(data["ok"])
         self.assertFalse(data["execute"]["executed"])
         self.assertTrue(any(item["rule"] == "BUILD_BINARY" for item in data["issues"]))
+
+    def test_run_launches_existing_rom_with_emulator_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "game"
+            emulator = root / "emu"
+            log_path = root / "emu-argv.json"
+            self.write_minimal_project(project)
+            (project / "fixture.z64").write_bytes(b"rom")
+            self.write_fake_emulator(emulator, log_path)
+
+            proc, data = self.run_json("run", "--project", str(project), "--emulator", str(emulator), "--json")
+            argv = json.loads(log_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["mode"], "run")
+        self.assertTrue(data["run"]["executed"])
+        self.assertEqual(data["run"]["returncode"], 0)
+        self.assertIn("fake emulator ok", data["run"]["stdout_tail"])
+        self.assertEqual(Path(argv[-1]).name, "fixture.z64")
+
+    def test_run_missing_rom_returns_user_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "game"
+            self.write_minimal_project(project)
+            proc, data = self.run_json("run", "--project", str(project), "--emulator", "echo", "--json")
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertFalse(data["ok"])
+        self.assertFalse(data["run"]["executed"])
+        self.assertTrue(any(item["rule"] == "RUN_ROM" for item in data["issues"]))
+
+    def test_run_missing_emulator_returns_environment_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "game"
+            self.write_minimal_project(project)
+            (project / "fixture.z64").write_bytes(b"rom")
+            proc, data = self.run_json("run", "--project", str(project), "--emulator", str(root / "missing-emu"), "--json")
+
+        self.assertEqual(proc.returncode, 2)
+        self.assertFalse(data["ok"])
+        self.assertFalse(data["run"]["executed"])
+        self.assertTrue(any(item["rule"] == "RUN_EMULATOR" for item in data["issues"]))
+
+    def test_run_build_first_then_launches_rom(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "game"
+            sdk = root / "sdk"
+            pyrite = root / "pyrite64"
+            emulator = root / "emu"
+            build_log = root / "build-argv.json"
+            emu_log = root / "emu-argv.json"
+            self.write_fake_sdk(sdk)
+            self.write_minimal_project(project, {"pathN64Inst": str(sdk)})
+            self.write_fake_pyrite64(pyrite, build_log)
+            self.write_fake_emulator(emulator, emu_log)
+            (project / "fixture.z64").write_bytes(b"rom")
+
+            proc, data = self.run_json(
+                "run",
+                "--build",
+                "--project",
+                str(project),
+                "--pyrite64-binary",
+                str(pyrite),
+                "--emulator",
+                str(emulator),
+                "--json",
+            )
+            emu_argv = json.loads(emu_log.read_text(encoding="utf-8"))
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["mode"], "build_then_run")
+        self.assertTrue(data["build"]["execute"]["executed"])
+        self.assertTrue(data["run"]["executed"])
+        self.assertEqual(Path(emu_argv[-1]).name, "fixture.z64")
 
     def test_scene_ls_empty_project(self) -> None:
         proc, data = self.run_json("scene", "ls", "--project", "n64/examples/empty", "--json")

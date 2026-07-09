@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import shutil
 import struct
 import subprocess
@@ -27,7 +28,7 @@ LIMITS_PATH = REPO_ROOT / "docs" / "docs" / "n64" / "limits.json"
 DEFAULT_HISTORY_PATH = REPO_ROOT / ".bf64" / "operations.jsonl"
 PROJECT_FILENAME = "project.p64proj"
 MAX_COMPONENT_ID = 12
-CLI_VERSION = "0.6.0"
+CLI_VERSION = "0.7.0"
 HISTORY_SCHEMA_VERSION = 2
 VALIDATABLE_ASSET_KINDS = {"texture", "model", "audio", "font"}
 PROJECT_ASSET_KINDS = ("texture", "model", "audio", "font", "prefab", "node_graph", "unknown")
@@ -1855,6 +1856,12 @@ def build_command_exit_code(result: dict[str, Any]) -> int:
     return 1 if has_errors(result.get("issues", [])) else 0
 
 
+def command_exit_code(result: dict[str, Any], env_rules: set[str]) -> int:
+    if any(item.get("severity") == "error" and item.get("rule") in env_rules for item in result.get("issues", [])):
+        return 2
+    return 1 if has_errors(result.get("issues", [])) else 0
+
+
 def execute_build(args: argparse.Namespace) -> dict[str, Any]:
     result = build_build_plan(args.project, True)
     result["mode"] = "execute"
@@ -2003,6 +2010,255 @@ def cmd_build(args: argparse.Namespace) -> int:
     else:
         print_build_plan(result)
     exit_code = build_command_exit_code(result)
+    project_path = None
+    project = result.get("project")
+    if isinstance(project, dict) and project.get("config_path"):
+        project_path = Path(project["config_path"])
+    record_if_requested(args, result, exit_code, project_path)
+    return exit_code
+
+
+def run_next_actions(result: dict[str, Any]) -> list[str]:
+    actions: list[str] = []
+    if result.get("ok"):
+        actions.append("Run command completed; inspect emulator stdout/stderr tails for runtime output.")
+        return actions
+    if any(item.get("rule") == "RUN_ROM" for item in result.get("issues", [])):
+        actions.append("Build the ROM first with ./bf64 build --execute or re-run with ./bf64 run --build.")
+    if any(item.get("rule") == "RUN_EMULATOR" for item in result.get("issues", [])):
+        actions.append("Install ares/gopher64 or pass --emulator <command>.")
+    if any(item.get("rule") == "RUN_EXECUTE" for item in result.get("issues", [])):
+        actions.append("Inspect run.stdout_tail and run.stderr_tail for emulator failure details.")
+    if not actions:
+        actions.append("Fix run errors and try again.")
+    return actions
+
+
+def resolve_emulator_command(emulator_spec: str | None) -> tuple[list[str] | None, list[dict[str, str]]]:
+    raw = (emulator_spec or "ares").strip()
+    if not raw:
+        return None, [
+            issue(
+                "error",
+                "RUN_EMULATOR",
+                "Emulator command is empty.",
+                "Set project pathEmu or pass --emulator ares/gopher64.",
+            )
+        ]
+    try:
+        parts = shlex.split(raw)
+    except ValueError as exc:
+        return None, [issue("error", "RUN_EMULATOR", f"Could not parse emulator command: {exc}", "Fix shell quoting.")]
+    if not parts:
+        return None, [issue("error", "RUN_EMULATOR", "Emulator command is empty.")]
+
+    executable = parts[0]
+    executable_path = Path(executable).expanduser()
+    has_path_separator = "/" in executable or "\\" in executable
+    if has_path_separator or executable_path.is_absolute():
+        candidate = executable_path if executable_path.is_absolute() else Path.cwd() / executable_path
+        if not candidate.exists() or not candidate.is_file() or not os.access(candidate, os.X_OK):
+            return None, [
+                issue(
+                    "error",
+                    "RUN_EMULATOR",
+                    f"Emulator is not executable or does not exist: {executable}.",
+                    "Pass --emulator <path/to/ares> or install ares/gopher64 on PATH.",
+                    "docs/docs/n64/emulation-and-hardware-testing.md",
+                )
+            ]
+        parts[0] = str(candidate)
+        return parts, []
+
+    found = shutil.which(executable)
+    if not found:
+        return None, [
+            issue(
+                "error",
+                "RUN_EMULATOR",
+                f"Emulator command not found on PATH: {executable}.",
+                "Install ares/gopher64 or pass --emulator <path/to/emulator>.",
+                "docs/docs/n64/emulation-and-hardware-testing.md",
+            )
+        ]
+    parts[0] = found
+    return parts, []
+
+
+def run_command_artifacts(rom_path: Path) -> list[dict[str, Any]]:
+    return [artifact_entry(rom_path, "rom")]
+
+
+def execute_run(args: argparse.Namespace) -> dict[str, Any]:
+    build_result: dict[str, Any] | None = None
+    if args.build:
+        build_args = argparse.Namespace(
+            project=args.project,
+            pyrite64_binary=args.pyrite64_binary,
+            timeout=args.build_timeout,
+        )
+        build_result = execute_build(build_args)
+        if not build_result.get("ok"):
+            result = {
+                "ok": False,
+                "command": "run",
+                "kind": "run",
+                "project": build_result.get("project"),
+                "mode": "build_then_run",
+                "build": build_result,
+                "run": {"requested": True, "executed": False, "skipped_reason": "build_failed"},
+                "issues": list(build_result.get("issues", [])),
+                "artifacts": build_result.get("artifacts", []),
+            }
+            result["next_actions"] = run_next_actions(result)
+            return result
+
+    plan = build_build_plan(args.project, False)
+    result: dict[str, Any] = {
+        "ok": False,
+        "command": "run",
+        "kind": "run",
+        "mode": "build_then_run" if args.build else "run",
+        "project": plan.get("project"),
+        "build": build_result,
+        "plan": {
+            "rom": (plan.get("plan") or {}).get("rom") if isinstance(plan.get("plan"), dict) else None,
+        },
+        "run": {
+            "requested": True,
+            "executed": False,
+            "emulator": None,
+            "argv": [],
+            "returncode": None,
+            "duration_ms": None,
+        },
+        "issues": [],
+        "artifacts": [],
+    }
+
+    if has_errors(plan.get("issues", [])):
+        result["issues"].extend(plan.get("issues", []))
+        result["run"]["skipped_reason"] = "plan_failed"
+        result["artifacts"] = plan.get("artifacts", [])
+        result["next_actions"] = run_next_actions(result)
+        return result
+
+    rom_info = (plan.get("plan") or {}).get("rom", {}) if isinstance(plan.get("plan"), dict) else {}
+    rom_path = Path(str(rom_info.get("path", ""))) if isinstance(rom_info, dict) else Path()
+    result["artifacts"] = run_command_artifacts(rom_path)
+    if not rom_path.exists() or not rom_path.is_file():
+        result["issues"].append(
+            issue(
+                "error",
+                "RUN_ROM",
+                f"ROM does not exist: {rom_path}.",
+                "Build the project first with ./bf64 build --execute, or pass --build to run.",
+            )
+        )
+        result["run"]["skipped_reason"] = "rom_missing"
+        result["next_actions"] = run_next_actions(result)
+        return result
+
+    config = None
+    project_path = result.get("project")
+    if isinstance(project_path, dict) and project_path.get("config_path"):
+        try:
+            loaded = read_json_file(Path(project_path["config_path"]))
+            if isinstance(loaded, dict):
+                config = loaded
+        except Exception:
+            config = None
+    default_emulator = str((config or {}).get("pathEmu") or "ares")
+    emulator_spec = args.emulator or default_emulator
+    emulator_argv, emulator_issues = resolve_emulator_command(emulator_spec)
+    if emulator_issues:
+        result["issues"].extend(emulator_issues)
+        result["run"]["emulator"] = emulator_spec
+        result["run"]["skipped_reason"] = "emulator_not_found"
+        result["next_actions"] = run_next_actions(result)
+        return result
+
+    argv = [*(emulator_argv or []), str(rom_path)]
+    result["run"]["emulator"] = emulator_spec
+    result["run"]["argv"] = argv
+    started_at = time.perf_counter()
+    try:
+        proc = subprocess.run(
+            argv,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=args.timeout if args.timeout and args.timeout > 0 else None,
+        )
+        result["run"]["executed"] = True
+        result["run"]["returncode"] = proc.returncode
+        result["run"]["duration_ms"] = int((time.perf_counter() - started_at) * 1000)
+        result["run"]["stdout_tail"] = tail_text(proc.stdout)
+        result["run"]["stderr_tail"] = tail_text(proc.stderr)
+        result["artifacts"] = run_command_artifacts(rom_path)
+        if proc.returncode != 0:
+            result["issues"].append(
+                issue(
+                    "error",
+                    "RUN_EXECUTE",
+                    f"Emulator exited with code {proc.returncode}.",
+                    "Inspect run.stdout_tail and run.stderr_tail for emulator details.",
+                )
+            )
+        result["ok"] = not has_errors(result["issues"])
+    except subprocess.TimeoutExpired as exc:
+        result["run"]["executed"] = True
+        result["run"]["duration_ms"] = int((time.perf_counter() - started_at) * 1000)
+        result["run"]["stdout_tail"] = tail_text(exc.stdout or "")
+        result["run"]["stderr_tail"] = tail_text(exc.stderr or "")
+        result["issues"].append(
+            issue(
+                "error",
+                "RUN_TIMEOUT",
+                f"Emulator timed out after {args.timeout} seconds.",
+                "Increase --timeout or close the emulator manually.",
+            )
+        )
+    except OSError as exc:
+        result["issues"].append(
+            issue(
+                "error",
+                "RUN_EMULATOR",
+                f"Could not execute emulator: {exc}",
+                "Install ares/gopher64 or pass --emulator <command>.",
+            )
+        )
+
+    result["next_actions"] = run_next_actions(result)
+    return result
+
+
+def print_run_result(result: dict[str, Any]) -> None:
+    output_result(result, False)
+    project = result.get("project")
+    if isinstance(project, dict):
+        print(f"Project: {project.get('name')} ({project.get('path')})")
+    run = result.get("run", {})
+    if isinstance(run, dict):
+        print(f"Run: executed={run.get('executed')} returncode={run.get('returncode')} emulator={run.get('emulator')}")
+    plan = result.get("plan", {})
+    rom = plan.get("rom") if isinstance(plan, dict) else None
+    if isinstance(rom, dict):
+        print(f"ROM: {rom.get('path')} exists={rom.get('exists')}")
+    if result.get("next_actions"):
+        print("Next actions:")
+        for action in result["next_actions"]:
+            print(f"- {action}")
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    result = execute_run(args)
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print_run_result(result)
+    exit_code = command_exit_code(result, {"BUILD_TOOLCHAIN", "BUILD_BINARY", "RUN_EMULATOR"})
     project_path = None
     project = result.get("project")
     if isinstance(project, dict) and project.get("config_path"):
@@ -2846,6 +3102,18 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
     build.add_argument("--history-path", help="Override operation history JSONL path for --record")
     build.set_defaults(func=cmd_build)
+
+    run = sub.add_parser("run", help="Run a built BF64 ROM in an emulator")
+    run.add_argument("--project", default=".", help="Project directory or project.p64proj path")
+    run.add_argument("--build", action="store_true", help="Run build --execute before launching the ROM")
+    run.add_argument("--pyrite64-binary", help="Path to the Pyrite64 editor binary used by --build")
+    run.add_argument("--emulator", help="Emulator command override; defaults to project pathEmu or ares")
+    run.add_argument("--timeout", type=int, default=0, help="Optional emulator timeout in seconds; 0 means no timeout")
+    run.add_argument("--build-timeout", type=int, default=0, help="Optional --build timeout in seconds; 0 means no timeout")
+    run.add_argument("--json", action="store_true", help="Emit stable JSON")
+    run.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
+    run.add_argument("--history-path", help="Override operation history JSONL path for --record")
+    run.set_defaults(func=cmd_run)
 
     project = sub.add_parser("project", help="Read project-level BF64 status")
     project_sub = project.add_subparsers(dest="project_command", required=True)
