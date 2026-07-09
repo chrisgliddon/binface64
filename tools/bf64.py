@@ -27,8 +27,10 @@ LIMITS_PATH = REPO_ROOT / "docs" / "docs" / "n64" / "limits.json"
 DEFAULT_HISTORY_PATH = REPO_ROOT / ".bf64" / "operations.jsonl"
 PROJECT_FILENAME = "project.p64proj"
 MAX_COMPONENT_ID = 12
-CLI_VERSION = "0.3.0"
+CLI_VERSION = "0.4.0"
 HISTORY_SCHEMA_VERSION = 2
+VALIDATABLE_ASSET_KINDS = {"texture", "model", "audio", "font"}
+PROJECT_ASSET_KINDS = ("texture", "model", "audio", "font", "prefab", "node_graph", "unknown")
 
 
 def load_limits() -> dict[str, Any]:
@@ -1159,25 +1161,148 @@ def classify_asset(path: Path) -> str:
     return "unknown"
 
 
-def asset_inventory(project_root: Path) -> dict[str, Any]:
+def asset_conf_path(asset_path: Path) -> Path:
+    return Path(str(asset_path) + ".conf")
+
+
+def path_relative_to(path: Path, base: Path) -> str:
+    try:
+        return str(path.relative_to(base))
+    except ValueError:
+        return str(path)
+
+
+def is_path_relative_to(path: Path, base: Path) -> bool:
+    try:
+        path.resolve().relative_to(base.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def conf_parse_issue(conf: dict[str, Any], conf_path: str | None) -> dict[str, str] | None:
+    if "__parse_error__" not in conf:
+        return None
+    return issue(
+        "error",
+        "CONF",
+        f"Could not parse asset sidecar {conf_path}: {conf['__parse_error__']}",
+        "Fix the sidecar JSON or remove it so BF64 can regenerate metadata.",
+        "docs/docs/agent/ARCHITECTURE.md#31-project-format",
+    )
+
+
+def asset_output_paths(project_root: Path, path: Path, kind: str) -> dict[str, str]:
+    rel_project = path_relative_to(path, project_root)
+    rel_assets = rel_project
+    if rel_assets.startswith("assets/"):
+        rel_assets = rel_assets[len("assets/") :]
+
+    out_path = Path("filesystem") / rel_assets
+    lower = path.name.lower()
+    ext = path.suffix.lower()
+    new_ext: str | None = None
+    if kind == "texture":
+        new_ext = ".bci" if lower.endswith(".bci.png") else ".sprite"
+    elif kind == "audio" and ext in {".wav", ".mp3"}:
+        new_ext = ".wav64"
+    elif kind == "audio" and ext == ".xm":
+        new_ext = ".xm64"
+    elif kind == "model":
+        new_ext = ".t3dm"
+    elif kind == "font" and ext == ".ttf":
+        new_ext = ".font64"
+    elif kind == "prefab":
+        new_ext = ".pf"
+    elif kind == "node_graph":
+        new_ext = ".pg"
+
+    if new_ext is None:
+        return {}
+
+    out_path = out_path.with_suffix(new_ext)
+    out = str(out_path)
+    return {
+        "out_path": out,
+        "rom_path": "rom:/" + out.removeprefix("filesystem/"),
+    }
+
+
+def asset_entry(project_root: Path, path: Path) -> dict[str, Any]:
+    kind = classify_asset(path)
+    conf, conf_path = load_conf(path, None)
+    parse_issue = conf_parse_issue(conf, conf_path)
+    conf_exists = conf_path is not None
+    conf_ok = parse_issue is None
+    safe_conf = conf if conf_ok else {}
+    try:
+        size_bytes = path.stat().st_size
+    except OSError:
+        size_bytes = 0
+
+    entry: dict[str, Any] = {
+        "path": str(path),
+        "relative_path": path_relative_to(path, project_root),
+        "asset_path": path_relative_to(path, project_root / "assets"),
+        "name": path.name,
+        "extension": path.suffix.lower() or "(none)",
+        "kind": kind,
+        "validatable": kind in VALIDATABLE_ASSET_KINDS,
+        "size_bytes": size_bytes,
+        "conf_path": conf_path or str(asset_conf_path(path)),
+        "conf_exists": conf_exists,
+        "conf_ok": conf_ok,
+        "issues": [parse_issue] if parse_issue else [],
+    }
+    for key in (
+        "uuid",
+        "format",
+        "baseScale",
+        "compression",
+        "gltfBVH",
+        "exclude",
+        "wavForceMono",
+        "wavResampleRate",
+        "wavCompression",
+        "fontId",
+    ):
+        if key in safe_conf:
+            entry[key] = safe_conf[key]
+    if "fontCharset" in safe_conf:
+        entry["fontCharsetLength"] = len(str(safe_conf["fontCharset"]))
+    entry.update(asset_output_paths(project_root, path, kind))
+    return entry
+
+
+def scan_project_assets(project_root: Path, kind: str | None = None, include_entries: bool = False) -> dict[str, Any]:
     assets_root = project_root / "assets"
     by_kind: dict[str, int] = {}
     by_extension: dict[str, int] = {}
     conf_count = 0
     missing_assets_for_conf: list[str] = []
     total_files = 0
+    entries: list[dict[str, Any]] = []
+    issues: list[dict[str, str]] = []
 
     if not assets_root.exists():
-        return {
+        inventory: dict[str, Any] = {
             "assets_root": str(assets_root),
             "exists": False,
+            "filter_kind": kind,
             "total_files": 0,
             "total_assets": 0,
+            "returned_assets": 0,
             "conf_count": 0,
             "by_kind": {},
             "by_extension": {},
             "missing_assets_for_conf": [],
+            "validatable_count": 0,
+            "unsupported_count": 0,
+            "issues": [],
         }
+        if include_entries:
+            inventory["assets"] = []
+        return inventory
 
     for path in assets_root.rglob("*"):
         if not path.is_file():
@@ -1190,21 +1315,43 @@ def asset_inventory(project_root: Path) -> dict[str, Any]:
             if not asset_path.exists():
                 missing_assets_for_conf.append(rel)
             continue
-        kind = classify_asset(path)
-        by_kind[kind] = by_kind.get(kind, 0) + 1
+        asset_kind = classify_asset(path)
+        by_kind[asset_kind] = by_kind.get(asset_kind, 0) + 1
         ext = path.suffix.lower() or "(none)"
         by_extension[ext] = by_extension.get(ext, 0) + 1
+        entry = asset_entry(project_root, path)
+        if entry["issues"]:
+            issues.extend(entry["issues"])
+        entries.append(entry)
 
-    return {
+    selected_entries = [entry for entry in entries if kind is None or entry["kind"] == kind]
+    validatable_count = sum(1 for entry in entries if entry["validatable"])
+    unsupported_count = len(entries) - validatable_count
+
+    inventory = {
         "assets_root": str(assets_root),
         "exists": True,
+        "filter_kind": kind,
         "total_files": total_files,
-        "total_assets": sum(by_kind.values()),
+        "total_assets": len(entries),
+        "returned_assets": len(selected_entries),
         "conf_count": conf_count,
         "by_kind": dict(sorted(by_kind.items())),
         "by_extension": dict(sorted(by_extension.items())),
         "missing_assets_for_conf": missing_assets_for_conf[:50],
+        "validatable_count": validatable_count,
+        "unsupported_count": unsupported_count,
+        "issues": issues,
     }
+    if include_entries:
+        inventory["assets"] = selected_entries
+    return inventory
+
+
+def asset_inventory(project_root: Path) -> dict[str, Any]:
+    inventory = scan_project_assets(project_root, include_entries=False)
+    inventory.pop("issues", None)
+    return inventory
 
 
 def toolchain_summary(doctor: dict[str, Any]) -> dict[str, Any]:
@@ -1319,6 +1466,352 @@ def cmd_project_status(args: argparse.Namespace) -> int:
     if isinstance(project, dict) and project.get("config_path"):
         project_path = Path(project["config_path"])
     record_if_requested(args, result, exit_code, project_path)
+    return exit_code
+
+
+def resolve_project_asset(project_root: Path, asset_ref: str) -> tuple[Path | None, list[dict[str, str]]]:
+    assets_root = project_root / "assets"
+    raw = Path(asset_ref)
+    issues: list[dict[str, str]] = []
+
+    def usable(path: Path) -> bool:
+        return (
+            path.exists()
+            and path.is_file()
+            and not path.name.endswith(".conf")
+            and is_path_relative_to(path, assets_root)
+        )
+
+    seen: set[str] = set()
+    direct_candidates = [raw, project_root / raw, assets_root / raw]
+    for candidate in direct_candidates:
+        if not usable(candidate):
+            continue
+        key = str(candidate.resolve())
+        if key in seen:
+            continue
+        return candidate, []
+
+    if not assets_root.exists():
+        return None, [
+            issue(
+                "error",
+                "ASSET",
+                f"Project assets directory does not exist: {assets_root}.",
+                "Create assets/ or pass the correct --project path.",
+            )
+        ]
+
+    wanted = asset_ref.replace("\\", "/")
+    matches: list[Path] = []
+    for path in assets_root.rglob("*"):
+        if not path.is_file() or path.name.endswith(".conf"):
+            continue
+        rel_project = path_relative_to(path, project_root).replace("\\", "/")
+        rel_asset = path_relative_to(path, assets_root).replace("\\", "/")
+        if wanted in {rel_project, rel_asset, path.name}:
+            key = str(path.resolve())
+            if key not in seen:
+                seen.add(key)
+                matches.append(path)
+
+    if len(matches) == 1:
+        return matches[0], []
+    if len(matches) > 1:
+        preview = ", ".join(path_relative_to(path, project_root) for path in matches[:10])
+        issues.append(
+            issue(
+                "error",
+                "ASSET",
+                f"Asset reference '{asset_ref}' is ambiguous; matches: {preview}.",
+                "Use the project-relative assets/<path> form.",
+            )
+        )
+    else:
+        issues.append(
+            issue(
+                "error",
+                "ASSET",
+                f"Could not find asset '{asset_ref}' under {assets_root}.",
+                "Use ./bf64 asset ls --project <project> to find the project-relative asset path.",
+            )
+        )
+    return None, issues
+
+
+def validator_args_from_asset_command(args: argparse.Namespace) -> argparse.Namespace:
+    return argparse.Namespace(
+        texture_format=getattr(args, "texture_format", None),
+        scene_pipeline=getattr(args, "scene_pipeline", None),
+        role=getattr(args, "role", "unknown"),
+    )
+
+
+def validate_project_asset_entry(
+    entry: dict[str, Any],
+    limits: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    path = Path(entry["path"])
+    kind = str(entry["kind"])
+    conf, conf_path = load_conf(path, None)
+    parse_issue = conf_parse_issue(conf, conf_path)
+    if parse_issue:
+        return {
+            "ok": False,
+            "path": str(path),
+            "kind": kind,
+            "metadata": {"conf": conf_path, "skipped": False},
+            "issues": [parse_issue],
+        }
+    if kind not in VALIDATABLE_ASSET_KINDS:
+        return {
+            "ok": True,
+            "path": str(path),
+            "kind": kind,
+            "metadata": {
+                "conf": conf_path,
+                "skipped": True,
+                "skip_reason": "No read-only validator exists for this project asset kind yet.",
+            },
+            "issues": [],
+        }
+
+    validate_args = validator_args_from_asset_command(args)
+    if kind == "texture":
+        return validate_texture(path, conf, conf_path, validate_args, limits)
+    if kind == "model":
+        return validate_model(path, conf, conf_path, validate_args, limits)
+    if kind == "audio":
+        return validate_audio(path, conf, conf_path, validate_args, limits)
+    if kind == "font":
+        return validate_font(path, conf_path)
+    raise AssertionError(f"unhandled asset kind: {kind}")
+
+
+def summarize_asset_validation(results: list[dict[str, Any]]) -> dict[str, Any]:
+    severity_counts: dict[str, int] = {}
+    by_kind: dict[str, dict[str, int]] = {}
+    for result in results:
+        kind = str(result.get("kind", "unknown"))
+        stats = by_kind.setdefault(kind, {"total": 0, "validated": 0, "skipped": 0, "failed": 0})
+        stats["total"] += 1
+        if (result.get("metadata") or {}).get("skipped"):
+            stats["skipped"] += 1
+        else:
+            stats["validated"] += 1
+        if not result.get("ok", False):
+            stats["failed"] += 1
+        for item in result.get("issues", []):
+            severity = str(item.get("severity", "info"))
+            severity_counts[severity] = severity_counts.get(severity, 0) + 1
+
+    skipped = sum(1 for result in results if (result.get("metadata") or {}).get("skipped"))
+    failed = sum(1 for result in results if not result.get("ok", False))
+    return {
+        "selected_assets": len(results),
+        "validated": len(results) - skipped,
+        "skipped": skipped,
+        "failed": failed,
+        "issues": severity_counts,
+        "by_kind": dict(sorted(by_kind.items())),
+    }
+
+
+def flatten_asset_issues(results: list[dict[str, Any]], project_root: Path) -> list[dict[str, Any]]:
+    flattened: list[dict[str, Any]] = []
+    for result in results:
+        rel_path = path_relative_to(Path(result.get("path", "")), project_root)
+        for item in result.get("issues", []):
+            enriched = dict(item)
+            enriched.setdefault("path", rel_path)
+            flattened.append(enriched)
+    return flattened
+
+
+def print_asset_ls(result: dict[str, Any]) -> None:
+    output_result(result, False)
+    project = result.get("project")
+    if isinstance(project, dict):
+        print(f"Project: {project.get('name')} ({project.get('path')})")
+    summary = result.get("summary", {})
+    if isinstance(summary, dict):
+        print(
+            f"Assets: {summary.get('returned_assets', 0)} shown / {summary.get('total_assets', 0)} total "
+            f"by kind {summary.get('by_kind', {})}"
+        )
+    for entry in result.get("assets", []):
+        conf_state = "conf=ok" if entry.get("conf_exists") and entry.get("conf_ok") else "conf=missing"
+        if entry.get("conf_exists") and not entry.get("conf_ok"):
+            conf_state = "conf=invalid"
+        print(
+            f"{entry.get('kind'):10} {entry.get('relative_path')} "
+            f"{entry.get('size_bytes')} bytes {conf_state}"
+        )
+
+
+def print_asset_show(result: dict[str, Any]) -> None:
+    output_result(result, False)
+    asset = result.get("asset", {})
+    if isinstance(asset, dict):
+        print(f"Asset: {asset.get('relative_path')} ({asset.get('kind')}, {asset.get('size_bytes')} bytes)")
+        print(f"Conf: {asset.get('conf_path')} exists={asset.get('conf_exists')} ok={asset.get('conf_ok')}")
+        if asset.get("out_path"):
+            print(f"Output: {asset.get('out_path')} -> {asset.get('rom_path')}")
+    validation = result.get("validation", {})
+    if isinstance(validation, dict):
+        metadata = validation.get("metadata", {})
+        if isinstance(metadata, dict) and metadata.get("skipped"):
+            print(f"Validation: skipped ({metadata.get('skip_reason')})")
+        else:
+            print(f"Validation: {'OK' if validation.get('ok') else 'FAILED'}")
+
+
+def print_asset_validate_all(result: dict[str, Any]) -> None:
+    output_result(result, False)
+    summary = result.get("summary", {})
+    if isinstance(summary, dict):
+        print(
+            f"Assets: validated={summary.get('validated', 0)} skipped={summary.get('skipped', 0)} "
+            f"failed={summary.get('failed', 0)} issues={summary.get('issues', {})}"
+        )
+    for item in result.get("results", []):
+        metadata = item.get("metadata", {})
+        skipped = isinstance(metadata, dict) and metadata.get("skipped")
+        status = "SKIP" if skipped else ("OK" if item.get("ok") else "FAILED")
+        print(f"{status} {item.get('kind')} {path_relative_to(Path(item.get('path', '')), Path(result['project']['path']))}")
+        for issue_item in item.get("issues", []):
+            print(f"  {issue_item.get('severity', 'info').upper()} {issue_item.get('rule')}: {issue_item.get('message')}")
+
+
+def cmd_asset_ls(args: argparse.Namespace) -> int:
+    project_root, config_path, config, issues = resolve_project(args.project)
+    if project_root is None or config_path is None or config is None:
+        result = {"ok": False, "command": "asset ls", "kind": "asset_inventory", "project": args.project, "assets": [], "issues": issues}
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            output_result(result, False)
+        record_if_requested(args, result, 1)
+        return 1
+
+    inventory = scan_project_assets(project_root, args.kind, include_entries=True)
+    assets = inventory.pop("assets", [])
+    issues.extend(inventory.get("issues", []))
+    result = {
+        "ok": not has_errors(issues),
+        "command": "asset ls",
+        "kind": "asset_inventory",
+        "project": project_summary(project_root, config_path, config),
+        "summary": inventory,
+        "assets": assets,
+        "issues": issues,
+    }
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print_asset_ls(result)
+    exit_code = 1 if has_errors(issues) else 0
+    record_if_requested(args, result, exit_code, config_path)
+    return exit_code
+
+
+def cmd_asset_show(args: argparse.Namespace) -> int:
+    limits = load_limits()
+    project_root, config_path, config, issues = resolve_project(args.project)
+    if project_root is None or config_path is None or config is None:
+        result = {"ok": False, "command": "asset show", "kind": "asset", "project": args.project, "asset": args.asset, "issues": issues}
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            output_result(result, False)
+        record_if_requested(args, result, 1)
+        return 1
+
+    path, find_issues = resolve_project_asset(project_root, args.asset)
+    issues.extend(find_issues)
+    if path is None:
+        result = {
+            "ok": False,
+            "command": "asset show",
+            "kind": "asset",
+            "project": project_summary(project_root, config_path, config),
+            "asset": args.asset,
+            "issues": issues,
+        }
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            output_result(result, False)
+        record_if_requested(args, result, 1, config_path)
+        return 1
+
+    entry = asset_entry(project_root, path)
+    conf, _conf_path = load_conf(path, None)
+    validation = validate_project_asset_entry(entry, limits, args)
+    issues.extend(validation.get("issues", []))
+    result = {
+        "ok": not has_errors(issues) and validation.get("ok", False),
+        "command": "asset show",
+        "kind": "asset",
+        "project": project_summary(project_root, config_path, config),
+        "asset": entry,
+        "conf": conf if entry["conf_ok"] else {},
+        "validation": validation,
+        "issues": issues,
+    }
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print_asset_show(result)
+    exit_code = 1 if not result["ok"] else 0
+    record_if_requested(args, result, exit_code, path)
+    return exit_code
+
+
+def cmd_asset_validate_all(args: argparse.Namespace) -> int:
+    limits = load_limits()
+    project_root, config_path, config, issues = resolve_project(args.project)
+    if project_root is None or config_path is None or config is None:
+        result = {
+            "ok": False,
+            "command": "asset validate-all",
+            "kind": "asset_validation",
+            "project": args.project,
+            "results": [],
+            "issues": issues,
+        }
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            output_result(result, False)
+        record_if_requested(args, result, 1)
+        return 1
+
+    inventory = scan_project_assets(project_root, args.kind, include_entries=True)
+    assets = inventory.pop("assets", [])
+    results = [validate_project_asset_entry(entry, limits, args) for entry in assets]
+    validation_issues = flatten_asset_issues(results, project_root)
+    issues.extend(validation_issues)
+    summary = summarize_asset_validation(results)
+    summary["total_assets"] = inventory.get("total_assets", 0)
+    summary["filter_kind"] = args.kind
+    result = {
+        "ok": not has_errors(issues),
+        "command": "asset validate-all",
+        "kind": "asset_validation",
+        "project": project_summary(project_root, config_path, config),
+        "summary": summary,
+        "inventory": inventory,
+        "results": results,
+        "issues": issues,
+    }
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print_asset_validate_all(result)
+    exit_code = 1 if has_errors(issues) else 0
+    record_if_requested(args, result, exit_code, config_path)
     return exit_code
 
 
@@ -1643,7 +2136,7 @@ def cmd_constraints(args: argparse.Namespace) -> int:
 
 def command_name_from_args(args: argparse.Namespace) -> str:
     parts = [getattr(args, "command", "unknown")]
-    for attr in ("project_command", "scene_command", "history_command"):
+    for attr in ("project_command", "asset_command", "scene_command", "history_command"):
         value = getattr(args, attr, None)
         if value:
             parts.append(str(value))
@@ -1810,6 +2303,37 @@ def build_parser() -> argparse.ArgumentParser:
     project_status.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
     project_status.add_argument("--history-path", help="Override operation history JSONL path for --record")
     project_status.set_defaults(func=cmd_project_status)
+
+    asset = sub.add_parser("asset", help="Read and validate project assets")
+    asset_sub = asset.add_subparsers(dest="asset_command", required=True)
+    asset_ls = asset_sub.add_parser("ls", help="List assets in a BF64 project")
+    asset_ls.add_argument("--project", default=".", help="Project directory or project.p64proj path")
+    asset_ls.add_argument("--kind", choices=PROJECT_ASSET_KINDS, help="Only return assets of this classified kind")
+    asset_ls.add_argument("--json", action="store_true", help="Emit stable JSON")
+    asset_ls.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
+    asset_ls.add_argument("--history-path", help="Override operation history JSONL path for --record")
+    asset_ls.set_defaults(func=cmd_asset_ls)
+
+    asset_show = asset_sub.add_parser("show", help="Show one project asset by path or unique basename")
+    asset_show.add_argument("asset", help="Project-relative path, assets/<path>, or unique basename")
+    asset_show.add_argument("--project", default=".", help="Project directory or project.p64proj path")
+    asset_show.add_argument("--json", action="store_true", help="Emit stable JSON")
+    asset_show.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
+    asset_show.add_argument("--history-path", help="Override operation history JSONL path for --record")
+    asset_show.add_argument("--texture-format", help="Texture format name or id for strict texture validation")
+    asset_show.add_argument("--scene-pipeline", help="default, hdr, bigtex, or 0/1/2")
+    asset_show.add_argument("--role", choices=["sfx", "music", "voice", "unknown"], default="unknown", help="Audio role hint")
+    asset_show.set_defaults(func=cmd_asset_show)
+
+    asset_validate_all = asset_sub.add_parser("validate-all", help="Validate all supported assets in a BF64 project")
+    asset_validate_all.add_argument("--project", default=".", help="Project directory or project.p64proj path")
+    asset_validate_all.add_argument("--kind", choices=PROJECT_ASSET_KINDS, help="Only validate assets of this classified kind")
+    asset_validate_all.add_argument("--json", action="store_true", help="Emit stable JSON")
+    asset_validate_all.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
+    asset_validate_all.add_argument("--history-path", help="Override operation history JSONL path for --record")
+    asset_validate_all.add_argument("--scene-pipeline", help="default, hdr, bigtex, or 0/1/2")
+    asset_validate_all.add_argument("--role", choices=["sfx", "music", "voice", "unknown"], default="unknown", help="Audio role hint")
+    asset_validate_all.set_defaults(func=cmd_asset_validate_all)
 
     scene = sub.add_parser("scene", help="Read and validate project scenes")
     scene_sub = scene.add_subparsers(dest="scene_command", required=True)

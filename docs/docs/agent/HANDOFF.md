@@ -2,8 +2,8 @@
 
 **Repo:** `https://github.com/chrisgliddon/binface64` (fork of `HailToDodongo/pyrite64`)
 **Current branch:** `main`
-**Last session:** CLI entrypoint + project status + history v2 (2026-07-09)
-**Next session:** Phase 3 — `/skills` Scaffold + Core Engine Skills, unless priorities shift to read-only asset inventory or build/run
+**Last session:** Read-only asset inventory + bulk asset validation (2026-07-09)
+**Next session:** Phase 5 seed CLI — add read-only/dry-run `build` planning before `run`, `new`, or `import`
 
 This is the **only** memory between sessions. Read it first. Update it before ending a session.
 
@@ -26,7 +26,7 @@ This is the **only** memory between sessions. Read it first. Update it before en
 | 2 | Asset requirements & limitations | ✅ Done | (this session) | ~moderate | 5 docs in docs/docs/n64/: textures, models-and-meshes, audio-assets, rom-budgets, asset-checklist. n64.rst toctree updated. 3 parallel explore subagents over vendored tiny3d gltf_importer, libdragon audioconv64/mixer, mksprite/rdpq_tex/BCI. Both Phase 0 open questions #8 (glTF material set) and #9 (audioconv64 .mp3) resolved. Sphinx build verified (3 pre-existing warnings, none new). |
 | 3 | `/skills` scaffold + core engine skills | ⬜ Not started | — | ~300K est | Next session. See kickoff prompt in `phased-plan.md` Phase 3. |
 | 4 | Asset & content pipeline skills | ⬜ Not started | — | ~300K est | |
-| 5 | `bf64` CLI | 🌱 Seeded | (this session) | ~400K est | Out-of-order seed now includes root `./bf64`, `--version`, `doctor`, `project status`, asset/project/scene validation, read-only `scene ls/show/validate`, history schema v2, fixture tests, and CLI CI. Not the full Phase 5 CLI yet. |
+| 5 | `bf64` CLI | 🌱 Seeded | (this session) | ~400K est | Out-of-order seed now includes root `./bf64`, `--version`, `doctor`, `project status`, asset/project/scene validation, read-only `asset ls/show/validate-all`, read-only `scene ls/show/validate`, history schema v2, fixture tests, and CLI CI. Not the full Phase 5 CLI yet. |
 | 6 | MCP server | ⬜ Not started | — | ~400K est | |
 | 7 | Extensions system | ⬜ Not started | — | ~400K est (splittable 7a/7b) | |
 | 8 | CONTRIBUTING.md, vision, agent onboarding | ⬜ Not started | — | ~250K est | |
@@ -37,6 +37,50 @@ This is the **only** memory between sessions. Read it first. Update it before en
 - All N64 technical claims cite `docs/docs/n64/`; all API claims are verified against source.
 - Upstream Pyrite64 credits stay intact; divergence is tracked in `docs/docs/agent/DIVERGENCE.md`.
 - Every new capability ships with a matching skill in `/skills`.
+
+---
+
+## What this session (read-only asset inventory + bulk validation) completed
+
+This session added the first project asset surface on top of the validator primitives. It stays read-only and is intended as the highest-value bridge before a real `build` command exists.
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `tools/bf64.py` | Bumped CLI to `0.4.0`; added asset inventory helpers, sidecar parse checks, BF64 output/ROM path derivation, asset reference resolution, `asset ls`, `asset show`, and `asset validate-all`; wired asset commands into history schema v2. |
+| `tests/test_bf64_cli.py` | Added fixture tests for asset listing, asset show validation, bulk validation skip behavior, and `asset ls --record` history command naming. |
+| `docs/docs/agent/AGENTIC_SURFACE.md` | Documented the new asset commands, bulk validation behavior, and current unsupported read-only asset kinds. |
+| `docs/docs/agent/HANDOFF.md` | Recorded this session and updated the Phase 5 seed status. |
+
+### Current preferred commands
+
+- `./bf64 --version`
+- `./bf64 doctor --json`
+- `./bf64 project status --project n64/examples/empty --json`
+- `./bf64 asset ls --project n64/examples/empty --json`
+- `./bf64 asset show assets/crate32.png --project n64/examples/empty --json`
+- `./bf64 asset validate-all --project n64/examples/empty --json`
+- `./bf64 scene ls --project n64/examples/empty --json`
+- `./bf64 history list --json`
+
+### Verification
+
+- `python3 -m py_compile bf64 tools/bf64.py`
+- `python3 -m unittest discover -s tests -p 'test_*.py'`
+- `./bf64 asset ls --project n64/examples/empty --json`
+- `./bf64 asset show assets/crate32.png --project n64/examples/empty --json`
+- `./bf64 asset validate-all --project n64/examples/empty --json`
+- `PYRITE_DOCS_SKIP_DOXYGEN=1 .venv/bin/sphinx-build -b html . _build/html` (same pre-existing warnings only)
+
+### Remaining Phase 5 gaps
+
+- `build` next. Start with a read-only/dry-run build plan that resolves project config, asset validation summary, toolchain readiness, output ROM path, and expected generated artifacts before invoking make/toolchain commands.
+- Then `run` after `build` can report or create a ROM artifact.
+- `new`, then `import`.
+- Dedicated prefab and node-graph validators, likely after Phase 3 skills clarify the node graph API and generated C++ shape.
+- Explicit duplicate UUID repair command, with backups and history records.
+- Eventually split `tools/bf64.py` into modules once command count grows again.
 
 ---
 
@@ -80,7 +124,6 @@ This session made the seed CLI easier for humans, agents, CI, and future MCP wra
 
 ### Remaining Phase 5 gaps
 
-- Read-only asset inventory commands (`asset ls/show/validate-all`) using the inventory data started in `project status`.
 - `build`, then `run`.
 - `new`, then `import`.
 - Explicit duplicate UUID repair command, with backups and history records.

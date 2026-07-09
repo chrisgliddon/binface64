@@ -54,6 +54,37 @@ class Bf64CliTests(unittest.TestCase):
         self.assertEqual(data["assets"]["by_kind"]["model"], 1)
         self.assertIn("build_ready", data["toolchain"])
 
+    def test_asset_ls_empty_project(self) -> None:
+        proc, data = self.run_json("asset", "ls", "--project", "n64/examples/empty", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["summary"]["total_assets"], 3)
+        self.assertEqual(data["summary"]["validatable_count"], 2)
+        self.assertEqual(data["summary"]["by_kind"]["unknown"], 1)
+        paths = {asset["relative_path"]: asset for asset in data["assets"]}
+        self.assertEqual(paths["assets/crate32.png"]["kind"], "texture")
+        self.assertTrue(paths["assets/crate32.png"]["conf_exists"])
+        self.assertEqual(paths["assets/box.glb"]["out_path"], "filesystem/box.t3dm")
+
+    def test_asset_show_texture_includes_validation(self) -> None:
+        proc, data = self.run_json("asset", "show", "assets/crate32.png", "--project", "n64/examples/empty", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["asset"]["kind"], "texture")
+        self.assertEqual(data["asset"]["relative_path"], "assets/crate32.png")
+        self.assertEqual(data["conf"]["format"], 2)
+        self.assertTrue(data["validation"]["ok"])
+        self.assertEqual(data["validation"]["metadata"]["format"], "RGBA16")
+
+    def test_asset_validate_all_empty_project_skips_unknown_sources(self) -> None:
+        proc, data = self.run_json("asset", "validate-all", "--project", "n64/examples/empty", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["summary"]["validated"], 2)
+        self.assertEqual(data["summary"]["skipped"], 1)
+        skipped = [item for item in data["results"] if item["metadata"].get("skipped")]
+        self.assertEqual(skipped[0]["kind"], "unknown")
+
     def test_scene_ls_empty_project(self) -> None:
         proc, data = self.run_json("scene", "ls", "--project", "n64/examples/empty", "--json")
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -142,6 +173,31 @@ class Bf64CliTests(unittest.TestCase):
         self.assertEqual(record["exit_code"], 0)
         self.assertEqual(record["tool"]["name"], "bf64")
         self.assertIn("--project", record["argv"])
+        self.assertEqual(record["project_path"], "n64/examples/empty")
+
+    def test_history_v2_record_for_asset_ls(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            history = Path(tmp) / "history.jsonl"
+            proc, data = self.run_json(
+                "asset",
+                "ls",
+                "--project",
+                "n64/examples/empty",
+                "--record",
+                "--history-path",
+                str(history),
+                "--json",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(data["ok"])
+            rows = [json.loads(line) for line in history.read_text(encoding="utf-8").splitlines()]
+
+        self.assertEqual(len(rows), 1)
+        record = rows[0]
+        self.assertEqual(record["schema_version"], 2)
+        self.assertEqual(record["command"], "asset ls")
+        self.assertEqual(record["exit_code"], 0)
+        self.assertEqual(record["path"], "n64/examples/empty/project.p64proj")
         self.assertEqual(record["project_path"], "n64/examples/empty")
 
 

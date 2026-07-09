@@ -14,7 +14,7 @@ This page records the first machine-facing BF64 surface: structured N64 constrai
 |---|---|
 | `bf64` | Stable repository-local launcher for the BF64 CLI. |
 | `docs/docs/n64/limits.json` | Machine-readable version of the most important N64/BF64 limits. This is the source for validators and future MCP constraint tools. |
-| `tools/bf64.py` | No-dependency seed CLI for constraint lookup, asset preflight validation, and operation history. |
+| `tools/bf64.py` | No-dependency seed CLI for constraint lookup, project/scene/asset inspection, asset preflight validation, and operation history. |
 | `.bf64/operations.jsonl` | Local, ignored audit log written by commands that support `--record`. |
 | `tests/test_bf64_cli.py` | Fixture tests for the JSON contract and core validator behavior. |
 | `.github/workflows/bf64-cli.yml` | CI job for JSON validity, CLI compilation, and unit tests. |
@@ -55,6 +55,9 @@ Inspect projects and scenes:
 ./bf64 doctor --json
 ./bf64 doctor --strict --json
 ./bf64 project status --project n64/examples/empty --json
+./bf64 asset ls --project n64/examples/empty --json
+./bf64 asset show assets/crate32.png --project n64/examples/empty --json
+./bf64 asset validate-all --project n64/examples/empty --json
 ./bf64 scene ls --project n64/examples/empty --json
 ./bf64 scene show 1 --project n64/examples/empty --json
 ./bf64 scene validate --project n64/examples/empty --json
@@ -64,6 +67,7 @@ Record an operation and inspect history:
 
 ```bash
 ./bf64 project status --project n64/examples/empty --record --json
+./bf64 asset validate-all --project n64/examples/empty --record --json
 ./bf64 validate n64/examples/jam25/assets/PlayerJump00.wav --role sfx --record --json
 ./bf64 history list --json
 ```
@@ -136,11 +140,17 @@ Scene checks include `conf` / `graph` structure, object count budget, duplicate 
 
 `project status` combines project config, full scene validation, asset inventory counts, `doctor` toolchain checks, and suggested next actions. It is the first command agents should call when entering an unknown BF64 project.
 
+`asset ls` lists project assets under `assets/`, classifies them as texture/model/audio/font/prefab/node_graph/unknown, reports sidecar presence and parseability, and includes the BF64 ROM output path where the editor build pipeline has one.
+
+`asset show` resolves a project asset by `assets/<path>`, project-relative path, or unique basename, then returns the sidecar JSON and the matching read-only validation result.
+
+`asset validate-all` validates every supported project asset kind and explicitly skips unsupported read-only kinds such as `.blend` source files, prefabs, and node graphs. It is the current bulk preflight command before a real build exists.
+
 Known limits:
 
 - This is preflight validation. The tiny3d importer, mksprite, audioconv64, and a real ROM build remain the source of truth for deep pipeline assertions.
 - The model validator cannot prove the optimized retained-animation keyframe delta stays below 32768 ticks without running the tiny3d importer.
-- The validator does not yet import assets, mutate scenes, build ROMs, or launch emulators.
+- The validator does not yet import assets, mutate scenes, validate prefab/node-graph internals, build ROMs, or launch emulators.
 - `doctor` distinguishes default warnings from `--strict` environment errors. Missing N64 toolchain pieces do not block asset/scene validation.
 
 ---
@@ -157,7 +167,7 @@ Known limits:
 
 ## Expansion Backlog
 
-- Add `new`, `build`, `run`, `import`, and dedicated asset inventory commands.
+- Add `new`, `build`, `run`, and `import`.
 - Wrap `tools/bf64.py` from the Phase 6 MCP server instead of duplicating validation logic.
 - Expand structured scene/project schemas and preserve JSON compatibility with tests.
 - Add automatic artifact path capture for future build/import commands.
