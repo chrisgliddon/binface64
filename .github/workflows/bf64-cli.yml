@@ -4,12 +4,14 @@ on:
   push:
     branches: [ main ]
     paths:
+      - 'bf64'
       - 'tools/bf64.py'
       - 'tests/**'
       - 'docs/docs/n64/limits.json'
       - '.github/workflows/bf64-cli.yml'
   pull_request:
     paths:
+      - 'bf64'
       - 'tools/bf64.py'
       - 'tests/**'
       - 'docs/docs/n64/limits.json'
@@ -31,7 +33,7 @@ jobs:
         run: python3 -m json.tool docs/docs/n64/limits.json >/tmp/bf64-limits.json
 
       - name: Compile CLI
-        run: python3 -m py_compile tools/bf64.py
+        run: python3 -m py_compile bf64 tools/bf64.py
 
       - name: Run CLI tests
         run: python3 -m unittest discover -s tests -p 'test_*.py'

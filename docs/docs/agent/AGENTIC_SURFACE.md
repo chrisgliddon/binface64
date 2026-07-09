@@ -12,9 +12,10 @@ This page records the first machine-facing BF64 surface: structured N64 constrai
 
 | File | Role |
 |---|---|
+| `bf64` | Stable repository-local launcher for the BF64 CLI. |
 | `docs/docs/n64/limits.json` | Machine-readable version of the most important N64/BF64 limits. This is the source for validators and future MCP constraint tools. |
 | `tools/bf64.py` | No-dependency seed CLI for constraint lookup, asset preflight validation, and operation history. |
-| `.bf64/operations.jsonl` | Local, ignored audit log written by `tools/bf64.py validate --record`. |
+| `.bf64/operations.jsonl` | Local, ignored audit log written by commands that support `--record`. |
 | `tests/test_bf64_cli.py` | Fixture tests for the JSON contract and core validator behavior. |
 | `.github/workflows/bf64-cli.yml` | CI job for JSON validity, CLI compilation, and unit tests. |
 
@@ -27,42 +28,44 @@ The Markdown docs remain the human-readable ground truth. `limits.json` is the a
 List constraint topics:
 
 ```bash
-python3 tools/bf64.py constraints list --json
+./bf64 constraints list --json
 ```
 
 Read a constraint topic:
 
 ```bash
-python3 tools/bf64.py constraints texture --json
-python3 tools/bf64.py constraints model --json
-python3 tools/bf64.py constraints audio --json
+./bf64 constraints texture --json
+./bf64 constraints model --json
+./bf64 constraints audio --json
 ```
 
 Validate one asset:
 
 ```bash
-python3 tools/bf64.py validate n64/examples/bigtex/assets/img00.bci.png --scene-pipeline bigtex --json
-python3 tools/bf64.py validate n64/examples/jam25/assets/lab/floor00.ci4.png --texture-format CI4 --json
-python3 tools/bf64.py validate n64/examples/jam25/assets/PlayerJump00.wav --role sfx --json
-python3 tools/bf64.py validate n64/examples/empty/project.p64proj --json
-python3 tools/bf64.py validate n64/examples/empty/data/scenes/1/scene.json --json
+./bf64 validate n64/examples/bigtex/assets/img00.bci.png --scene-pipeline bigtex --json
+./bf64 validate n64/examples/jam25/assets/lab/floor00.ci4.png --texture-format CI4 --json
+./bf64 validate n64/examples/jam25/assets/PlayerJump00.wav --role sfx --json
+./bf64 validate n64/examples/empty/project.p64proj --json
+./bf64 validate n64/examples/empty/data/scenes/1/scene.json --json
 ```
 
 Inspect projects and scenes:
 
 ```bash
-python3 tools/bf64.py doctor --json
-python3 tools/bf64.py doctor --strict --json
-python3 tools/bf64.py scene ls --project n64/examples/empty --json
-python3 tools/bf64.py scene show 1 --project n64/examples/empty --json
-python3 tools/bf64.py scene validate --project n64/examples/empty --json
+./bf64 doctor --json
+./bf64 doctor --strict --json
+./bf64 project status --project n64/examples/empty --json
+./bf64 scene ls --project n64/examples/empty --json
+./bf64 scene show 1 --project n64/examples/empty --json
+./bf64 scene validate --project n64/examples/empty --json
 ```
 
 Record an operation and inspect history:
 
 ```bash
-python3 tools/bf64.py validate n64/examples/jam25/assets/PlayerJump00.wav --role sfx --record --json
-python3 tools/bf64.py history list --json
+./bf64 project status --project n64/examples/empty --record --json
+./bf64 validate n64/examples/jam25/assets/PlayerJump00.wav --role sfx --record --json
+./bf64 history list --json
 ```
 
 ---
@@ -97,10 +100,25 @@ Exit codes:
 |---|---|
 | 0 | Success. No validation errors. |
 | 1 | User or asset error. Output includes actionable issues. |
+| 2 | Environment/toolchain error. Currently used by `doctor --strict`; future `build` / `run` should use it too. |
 | 3 | Internal tooling error. |
 | 130 | Interrupted. |
 
-Phase 5 should reserve exit code 2 for environment/toolchain errors when `doctor`, `build`, and `run` land.
+---
+
+## Operation History
+
+Commands that support `--record` append JSONL records to `.bf64/operations.jsonl` by default. Use `--history-path <path>` in tests or automation when the default local history should not be touched.
+
+Current records use `schema_version: 2` and include:
+
+- `operation_id`
+- command and argv
+- exit code and duration
+- BF64 CLI version and git revision
+- path and project path when known
+- issue count, issue summary, and full issues
+- artifact paths when a future command emits build/import artifacts
 
 ---
 
@@ -115,6 +133,8 @@ Audio checks include BF64 editor-supported extensions, `wavCompression`, `wavRes
 Project checks include parseability, `sceneIdOnBoot` / `sceneIdOnReset` / `sceneIdLastOpened` references, and per-scene validation.
 
 Scene checks include `conf` / `graph` structure, object count budget, duplicate object UUIDs, component id range, render pipeline framebuffer constraints, BigTex `doClearColor: false`, and unusual audio frequencies.
+
+`project status` combines project config, full scene validation, asset inventory counts, `doctor` toolchain checks, and suggested next actions. It is the first command agents should call when entering an unknown BF64 project.
 
 Known limits:
 
@@ -137,9 +157,8 @@ Known limits:
 
 ## Expansion Backlog
 
-- Promote the seed CLI into the formal Phase 5 `bf64` command surface or add a wrapper entry point.
-- Add `new`, `build`, `run`, `import`, and `project status`.
+- Add `new`, `build`, `run`, `import`, and dedicated asset inventory commands.
 - Wrap `tools/bf64.py` from the Phase 6 MCP server instead of duplicating validation logic.
 - Expand structured scene/project schemas and preserve JSON compatibility with tests.
-- Add operation ids, command arguments, tool version, and repo revision to `.bf64/operations.jsonl`.
+- Add automatic artifact path capture for future build/import commands.
 - Decide whether duplicate scene UUID repair should be an explicit CLI command or only an editor action.

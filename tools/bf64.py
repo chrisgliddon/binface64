@@ -13,8 +13,10 @@ import json
 import os
 import shutil
 import struct
+import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +27,8 @@ LIMITS_PATH = REPO_ROOT / "docs" / "docs" / "n64" / "limits.json"
 DEFAULT_HISTORY_PATH = REPO_ROOT / ".bf64" / "operations.jsonl"
 PROJECT_FILENAME = "project.p64proj"
 MAX_COMPONENT_ID = 12
+CLI_VERSION = "0.3.0"
+HISTORY_SCHEMA_VERSION = 2
 
 
 def load_limits() -> dict[str, Any]:
@@ -1155,6 +1159,169 @@ def classify_asset(path: Path) -> str:
     return "unknown"
 
 
+def asset_inventory(project_root: Path) -> dict[str, Any]:
+    assets_root = project_root / "assets"
+    by_kind: dict[str, int] = {}
+    by_extension: dict[str, int] = {}
+    conf_count = 0
+    missing_assets_for_conf: list[str] = []
+    total_files = 0
+
+    if not assets_root.exists():
+        return {
+            "assets_root": str(assets_root),
+            "exists": False,
+            "total_files": 0,
+            "total_assets": 0,
+            "conf_count": 0,
+            "by_kind": {},
+            "by_extension": {},
+            "missing_assets_for_conf": [],
+        }
+
+    for path in assets_root.rglob("*"):
+        if not path.is_file():
+            continue
+        total_files += 1
+        rel = str(path.relative_to(project_root))
+        if path.name.endswith(".conf"):
+            conf_count += 1
+            asset_path = Path(str(path)[:-5])
+            if not asset_path.exists():
+                missing_assets_for_conf.append(rel)
+            continue
+        kind = classify_asset(path)
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+        ext = path.suffix.lower() or "(none)"
+        by_extension[ext] = by_extension.get(ext, 0) + 1
+
+    return {
+        "assets_root": str(assets_root),
+        "exists": True,
+        "total_files": total_files,
+        "total_assets": sum(by_kind.values()),
+        "conf_count": conf_count,
+        "by_kind": dict(sorted(by_kind.items())),
+        "by_extension": dict(sorted(by_extension.items())),
+        "missing_assets_for_conf": missing_assets_for_conf[:50],
+    }
+
+
+def toolchain_summary(doctor: dict[str, Any]) -> dict[str, Any]:
+    checks = doctor.get("checks", [])
+    missing = [check["name"] for check in checks if not check.get("ok")]
+    build_tools = {"N64_INST", "mksprite", "audioconv64", "n64tool"}
+    emu_tools = {"emulator"}
+    return {
+        "ok": doctor.get("ok", False),
+        "missing": missing,
+        "build_ready": not any(name in missing for name in build_tools),
+        "run_ready": not any(name in missing for name in emu_tools),
+    }
+
+
+def suggested_next_actions(
+    validation: dict[str, Any],
+    doctor: dict[str, Any],
+    inventory: dict[str, Any],
+) -> list[str]:
+    actions: list[str] = []
+    if has_errors(validation.get("issues", [])):
+        actions.append("Fix project/scene validation errors before attempting a ROM build.")
+    if not inventory.get("exists"):
+        actions.append("Create an assets/ directory or open/save the project in BF64.")
+
+    toolchain = toolchain_summary(doctor)
+    if not toolchain["build_ready"]:
+        actions.append("Install/configure the libdragon toolchain before using future build/import commands.")
+    if not toolchain["run_ready"]:
+        actions.append("Install ares or gopher64 before using future run commands.")
+    if not actions:
+        actions.append("Project status is clean for the currently implemented read-only checks.")
+    return actions
+
+
+def build_project_status(project_arg: str | None, strict_doctor: bool = False) -> dict[str, Any]:
+    limits = load_limits()
+    project_root, config_path, config, issues = resolve_project(project_arg)
+    if project_root is None or config_path is None or config is None:
+        doctor = build_doctor_result(strict_doctor)
+        return {
+            "ok": False,
+            "command": "project status",
+            "kind": "project_status",
+            "project": project_arg,
+            "doctor": doctor,
+            "issues": issues,
+            "next_actions": ["Pass --project <project-dir> or --project <path/to/project.p64proj>."],
+        }
+
+    validation = validate_project_file(config_path, limits)
+    doctor = build_doctor_result(strict_doctor)
+    inventory = asset_inventory(project_root)
+    status_issues = list(issues)
+    status_issues.extend(validation.get("issues", []))
+    if strict_doctor:
+        status_issues.extend(doctor.get("issues", []))
+
+    result = {
+        "ok": not has_errors(status_issues),
+        "command": "project status",
+        "kind": "project_status",
+        "project": project_summary(project_root, config_path, config),
+        "validation": validation,
+        "doctor": doctor,
+        "toolchain": toolchain_summary(doctor),
+        "assets": inventory,
+        "issues": status_issues,
+        "next_actions": suggested_next_actions(validation, doctor, inventory),
+    }
+    return result
+
+
+def print_project_status(result: dict[str, Any]) -> None:
+    output_result(result, False)
+    project = result.get("project")
+    if isinstance(project, dict):
+        print(f"Project: {project.get('name')} ({project.get('path')})")
+        print(f"ROM: {project.get('romName')}")
+        print(
+            "Scenes: boot={boot} reset={reset} last={last}".format(
+                boot=project.get("sceneIdOnBoot"),
+                reset=project.get("sceneIdOnReset"),
+                last=project.get("sceneIdLastOpened"),
+            )
+        )
+    validation = result.get("validation", {})
+    if isinstance(validation, dict):
+        print(f"Scene count: {validation.get('scene_count', 0)}")
+    assets = result.get("assets", {})
+    if isinstance(assets, dict):
+        print(f"Assets: {assets.get('total_assets', 0)} files by kind {assets.get('by_kind', {})}")
+    toolchain = result.get("toolchain", {})
+    if isinstance(toolchain, dict):
+        print(f"Toolchain: build_ready={toolchain.get('build_ready')} run_ready={toolchain.get('run_ready')}")
+    if result.get("next_actions"):
+        print("Next actions:")
+        for action in result["next_actions"]:
+            print(f"- {action}")
+
+
+def cmd_project_status(args: argparse.Namespace) -> int:
+    result = build_project_status(args.project, args.strict_doctor)
+    exit_code = 1 if has_errors(result.get("issues", [])) else 0
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print_project_status(result)
+    project_path = None
+    project = result.get("project")
+    if isinstance(project, dict) and project.get("config_path"):
+        project_path = Path(project["config_path"])
+    record_if_requested(args, result, exit_code, project_path)
+    return exit_code
+
+
 def validate_asset(args: argparse.Namespace) -> int:
     limits = load_limits()
     path = Path(args.path)
@@ -1167,8 +1334,7 @@ def validate_asset(args: argparse.Namespace) -> int:
             "issues": [issue("error", "PATH", "Asset path does not exist.", "Check the path and try again.")],
         }
         output_result(result, args.json)
-        if args.record:
-            record_operation("validate", path, result)
+        record_if_requested(args, result, 1, path)
         return 1
 
     conf, conf_path = load_conf(path, args.conf)
@@ -1202,12 +1368,12 @@ def validate_asset(args: argparse.Namespace) -> int:
         }
 
     output_result(result, args.json)
-    if args.record:
-        record_operation("validate", path, result)
-    return 1 if has_errors(result.get("issues", [])) else 0
+    exit_code = 1 if has_errors(result.get("issues", [])) else 0
+    record_if_requested(args, result, exit_code, path)
+    return exit_code
 
 
-def cmd_doctor(args: argparse.Namespace) -> int:
+def build_doctor_result(strict: bool = False) -> dict[str, Any]:
     issues: list[dict[str, str]] = []
     checks: list[dict[str, Any]] = []
 
@@ -1261,26 +1427,32 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "Install ares or gopher64 for hardware-accurate run checks.",
     )
 
-    if args.strict:
+    if strict:
         for item in issues:
             if item["severity"] == "warning":
                 item["severity"] = "error"
 
-    result = {
+    return {
         "ok": not has_errors(issues),
         "command": "doctor",
-        "metadata": {"repo_root": str(REPO_ROOT), "strict": args.strict},
+        "metadata": {"repo_root": str(REPO_ROOT), "strict": strict},
         "checks": checks,
         "issues": issues,
     }
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    result = build_doctor_result(args.strict)
+    exit_code = 2 if has_errors(result.get("issues", [])) else 0
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         output_result(result, False)
-        for check in checks:
+        for check in result.get("checks", []):
             status = "OK" if check["ok"] else "MISSING"
             print(f"{status} {check['name']}: {check['detail']}")
-    return 2 if has_errors(issues) else 0
+    record_if_requested(args, result, exit_code)
+    return exit_code
 
 def cmd_scene_ls(args: argparse.Namespace) -> int:
     limits = load_limits()
@@ -1288,6 +1460,7 @@ def cmd_scene_ls(args: argparse.Namespace) -> int:
     if project_root is None or config_path is None or config is None:
         result = {"ok": False, "command": "scene ls", "project": args.project, "scenes": [], "issues": issues}
         output_scene_result(result, args.json)
+        record_if_requested(args, result, 1)
         return 1
 
     scenes, scene_issues = list_scene_summaries(project_root, limits)
@@ -1313,7 +1486,9 @@ def cmd_scene_ls(args: argparse.Namespace) -> int:
         "issues": issues,
     }
     output_scene_result(result, args.json)
-    return 1 if not result["ok"] else 0
+    exit_code = 1 if not result["ok"] else 0
+    record_if_requested(args, result, exit_code, config_path)
+    return exit_code
 
 
 def cmd_scene_show(args: argparse.Namespace) -> int:
@@ -1322,6 +1497,7 @@ def cmd_scene_show(args: argparse.Namespace) -> int:
     if project_root is None or config_path is None or config is None:
         result = {"ok": False, "command": "scene show", "project": args.project, "issues": issues}
         output_scene_result(result, args.json)
+        record_if_requested(args, result, 1)
         return 1
 
     summary, doc, find_issues = find_scene(project_root, args.scene, limits)
@@ -1335,6 +1511,7 @@ def cmd_scene_show(args: argparse.Namespace) -> int:
             "issues": issues,
         }
         output_scene_result(result, args.json)
+        record_if_requested(args, result, 1, config_path)
         return 1
 
     issues.extend(summary.get("issues", []))
@@ -1350,7 +1527,9 @@ def cmd_scene_show(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         print_scene_show(result, args.depth)
-    return 1 if has_errors(issues) else 0
+    exit_code = 1 if has_errors(issues) else 0
+    record_if_requested(args, result, exit_code, Path(summary["path"]))
+    return exit_code
 
 
 def cmd_scene_validate(args: argparse.Namespace) -> int:
@@ -1359,6 +1538,7 @@ def cmd_scene_validate(args: argparse.Namespace) -> int:
     if project_root is None or config_path is None or config is None:
         result = {"ok": False, "command": "scene validate", "project": args.project, "issues": issues}
         output_scene_result(result, args.json)
+        record_if_requested(args, result, 1)
         return 1
 
     if args.scene:
@@ -1377,7 +1557,9 @@ def cmd_scene_validate(args: argparse.Namespace) -> int:
         result = validate_project_file(config_path, limits)
         result["command"] = "scene validate"
     output_scene_result(result, args.json)
-    return 1 if not result.get("ok") else 0
+    exit_code = 1 if not result.get("ok") else 0
+    record_if_requested(args, result, exit_code, config_path)
+    return exit_code
 
 
 def output_scene_result(result: dict[str, Any], as_json: bool) -> None:
@@ -1459,16 +1641,102 @@ def cmd_constraints(args: argparse.Namespace) -> int:
     return 0 if result.get("ok") else 1
 
 
-def record_operation(command: str, path: Path | None, result: dict[str, Any], history_path: Path = DEFAULT_HISTORY_PATH) -> None:
+def command_name_from_args(args: argparse.Namespace) -> str:
+    parts = [getattr(args, "command", "unknown")]
+    for attr in ("project_command", "scene_command", "history_command"):
+        value = getattr(args, attr, None)
+        if value:
+            parts.append(str(value))
+    return " ".join(parts)
+
+
+def current_repo_revision() -> str:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return proc.stdout.strip() if proc.returncode == 0 else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def issue_summary(issues: list[dict[str, Any]]) -> dict[str, Any]:
+    by_severity: dict[str, int] = {}
+    by_rule: dict[str, int] = {}
+    for item in issues:
+        severity = str(item.get("severity", "info"))
+        rule = str(item.get("rule", ""))
+        by_severity[severity] = by_severity.get(severity, 0) + 1
+        if rule:
+            by_rule[rule] = by_rule.get(rule, 0) + 1
+    return {"total": len(issues), "by_severity": by_severity, "by_rule": by_rule}
+
+
+def result_project_path(result: dict[str, Any]) -> str | None:
+    project = result.get("project")
+    if isinstance(project, dict) and project.get("path"):
+        return str(project["path"])
+    metadata = result.get("metadata")
+    if isinstance(metadata, dict) and result.get("kind") == "project" and metadata.get("path"):
+        return str(metadata["path"])
+    return None
+
+
+def record_if_requested(args: argparse.Namespace, result: dict[str, Any], exit_code: int, path: Path | None = None) -> None:
+    if not getattr(args, "record", False):
+        return
+    started_at = float(getattr(args, "_started_at", time.perf_counter()))
+    duration_ms = int((time.perf_counter() - started_at) * 1000)
+    history_path = Path(args.history_path) if getattr(args, "history_path", None) else DEFAULT_HISTORY_PATH
+    record_operation(
+        command_name_from_args(args),
+        path,
+        result,
+        history_path=history_path,
+        argv=list(getattr(args, "_argv", [])),
+        exit_code=exit_code,
+        duration_ms=duration_ms,
+    )
+
+
+def record_operation(
+    command: str,
+    path: Path | None,
+    result: dict[str, Any],
+    history_path: Path = DEFAULT_HISTORY_PATH,
+    *,
+    argv: list[str] | None = None,
+    exit_code: int = 0,
+    duration_ms: int | None = None,
+) -> None:
     history_path.parent.mkdir(parents=True, exist_ok=True)
+    issues = result.get("issues", [])
+    if not isinstance(issues, list):
+        issues = []
     record = {
+        "schema_version": HISTORY_SCHEMA_VERSION,
+        "operation_id": str(uuid.uuid4()),
         "ts": time.time(),
+        "tool": {
+            "name": "bf64",
+            "version": CLI_VERSION,
+            "repo_revision": current_repo_revision(),
+        },
         "command": command,
+        "argv": argv or [],
+        "exit_code": exit_code,
+        "duration_ms": duration_ms,
         "path": str(path) if path else None,
+        "project_path": result_project_path(result),
         "ok": result.get("ok", False),
         "kind": result.get("kind"),
-        "issue_count": len(result.get("issues", [])),
-        "issues": result.get("issues", []),
+        "issue_count": len(issues),
+        "issue_summary": issue_summary(issues),
+        "issues": issues,
+        "artifacts": result.get("artifacts", []),
     }
     with history_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, sort_keys=True) + "\n")
@@ -1506,11 +1774,14 @@ def cmd_history(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bf64", description="Agent-first BF64 utility surface")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {CLI_VERSION}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     doctor = sub.add_parser("doctor", help="Check local BF64 agent/tooling environment")
     doctor.add_argument("--strict", action="store_true", help="Treat missing optional build/run tools as errors")
     doctor.add_argument("--json", action="store_true", help="Emit stable JSON")
+    doctor.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
+    doctor.add_argument("--history-path", help="Override operation history JSONL path for --record")
     doctor.set_defaults(func=cmd_doctor)
 
     constraints = sub.add_parser("constraints", help="Query machine-readable N64/BF64 limits")
@@ -1524,16 +1795,29 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--conf", help="Explicit .conf sidecar path")
     validate.add_argument("--json", action="store_true", help="Emit stable JSON")
     validate.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
+    validate.add_argument("--history-path", help="Override operation history JSONL path for --record")
     validate.add_argument("--texture-format", help="Texture format name or id for strict texture validation")
     validate.add_argument("--scene-pipeline", help="default, hdr, bigtex, or 0/1/2")
     validate.add_argument("--role", choices=["sfx", "music", "voice", "unknown"], default="unknown", help="Audio role hint")
     validate.set_defaults(func=validate_asset)
+
+    project = sub.add_parser("project", help="Read project-level BF64 status")
+    project_sub = project.add_subparsers(dest="project_command", required=True)
+    project_status = project_sub.add_parser("status", help="Summarize project config, validation, assets, and toolchain")
+    project_status.add_argument("--project", default=".", help="Project directory or project.p64proj path")
+    project_status.add_argument("--strict-doctor", action="store_true", help="Treat missing build/run tools as status errors")
+    project_status.add_argument("--json", action="store_true", help="Emit stable JSON")
+    project_status.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
+    project_status.add_argument("--history-path", help="Override operation history JSONL path for --record")
+    project_status.set_defaults(func=cmd_project_status)
 
     scene = sub.add_parser("scene", help="Read and validate project scenes")
     scene_sub = scene.add_subparsers(dest="scene_command", required=True)
     scene_ls = scene_sub.add_parser("ls", help="List scenes in a BF64 project")
     scene_ls.add_argument("--project", default=".", help="Project directory or project.p64proj path")
     scene_ls.add_argument("--json", action="store_true", help="Emit stable JSON")
+    scene_ls.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
+    scene_ls.add_argument("--history-path", help="Override operation history JSONL path for --record")
     scene_ls.set_defaults(func=cmd_scene_ls)
 
     scene_show = scene_sub.add_parser("show", help="Show one scene by id or exact name")
@@ -1541,12 +1825,16 @@ def build_parser() -> argparse.ArgumentParser:
     scene_show.add_argument("--project", default=".", help="Project directory or project.p64proj path")
     scene_show.add_argument("--depth", type=int, default=3, help="Human-readable object tree depth; 0 hides tree")
     scene_show.add_argument("--json", action="store_true", help="Emit stable JSON including the raw scene document")
+    scene_show.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
+    scene_show.add_argument("--history-path", help="Override operation history JSONL path for --record")
     scene_show.set_defaults(func=cmd_scene_show)
 
     scene_validate = scene_sub.add_parser("validate", help="Validate one scene or all scenes in a BF64 project")
     scene_validate.add_argument("scene", nargs="?", help="Optional scene id or exact scene name")
     scene_validate.add_argument("--project", default=".", help="Project directory or project.p64proj path")
     scene_validate.add_argument("--json", action="store_true", help="Emit stable JSON")
+    scene_validate.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
+    scene_validate.add_argument("--history-path", help="Override operation history JSONL path for --record")
     scene_validate.set_defaults(func=cmd_scene_validate)
 
     history = sub.add_parser("history", help="Read local BF64 operation history")
@@ -1563,6 +1851,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    args._argv = list(argv if argv is not None else sys.argv[1:])
+    args._started_at = time.perf_counter()
     try:
         return int(args.func(args))
     except KeyboardInterrupt:

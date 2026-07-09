@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CLI = ROOT / "tools" / "bf64.py"
+CLI = ROOT / "bf64"
 
 
 class Bf64CliTests(unittest.TestCase):
@@ -39,6 +39,20 @@ class Bf64CliTests(unittest.TestCase):
         self.assertTrue(data["ok"])
         self.assertIn("texture", data["topics"])
         self.assertIn("scene", data["topics"])
+
+    def test_root_entrypoint_version(self) -> None:
+        proc = self.run_cli("--version")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertRegex(proc.stdout.strip(), r"^bf64 \d+\.\d+\.\d+$")
+
+    def test_project_status_empty_project(self) -> None:
+        proc, data = self.run_json("project", "status", "--project", "n64/examples/empty", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["project"]["name"], "Pyrite64 Project")
+        self.assertEqual(data["validation"]["scene_count"], 1)
+        self.assertEqual(data["assets"]["by_kind"]["model"], 1)
+        self.assertIn("build_ready", data["toolchain"])
 
     def test_scene_ls_empty_project(self) -> None:
         proc, data = self.run_json("scene", "ls", "--project", "n64/examples/empty", "--json")
@@ -103,6 +117,32 @@ class Bf64CliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertTrue(data["ok"])
         self.assertTrue(any(check["name"] == "python" for check in data["checks"]))
+
+    def test_history_v2_record_for_project_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            history = Path(tmp) / "history.jsonl"
+            proc, data = self.run_json(
+                "project",
+                "status",
+                "--project",
+                "n64/examples/empty",
+                "--record",
+                "--history-path",
+                str(history),
+                "--json",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(data["ok"])
+            rows = [json.loads(line) for line in history.read_text(encoding="utf-8").splitlines()]
+
+        self.assertEqual(len(rows), 1)
+        record = rows[0]
+        self.assertEqual(record["schema_version"], 2)
+        self.assertEqual(record["command"], "project status")
+        self.assertEqual(record["exit_code"], 0)
+        self.assertEqual(record["tool"]["name"], "bf64")
+        self.assertIn("--project", record["argv"])
+        self.assertEqual(record["project_path"], "n64/examples/empty")
 
 
 if __name__ == "__main__":
