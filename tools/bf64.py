@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import struct
 import sys
 import time
@@ -21,6 +23,8 @@ SCRIPT_PATH = Path(__file__).resolve()
 REPO_ROOT = SCRIPT_PATH.parent.parent
 LIMITS_PATH = REPO_ROOT / "docs" / "docs" / "n64" / "limits.json"
 DEFAULT_HISTORY_PATH = REPO_ROOT / ".bf64" / "operations.jsonl"
+PROJECT_FILENAME = "project.p64proj"
+MAX_COMPONENT_ID = 12
 
 
 def load_limits() -> dict[str, Any]:
@@ -158,6 +162,414 @@ def pipeline_id(value: str | None) -> int | None:
     if raw in {"2", "bigtex", "big_tex"}:
         return 2
     raise ValueError(f"unknown scene pipeline: {value}")
+
+
+def read_json_file(path: Path) -> dict[str, Any] | list[Any]:
+    with path.open("r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def resolve_project(project_arg: str | None) -> tuple[Path | None, Path | None, dict[str, Any] | None, list[dict[str, str]]]:
+    issues: list[dict[str, str]] = []
+    raw = Path(project_arg or ".")
+    config_path = raw if raw.suffix == ".p64proj" else raw / PROJECT_FILENAME
+
+    if not config_path.exists():
+        issues.append(
+            issue(
+                "error",
+                "PROJECT",
+                f"Could not find {PROJECT_FILENAME} at {config_path}.",
+                "Pass --project <project-dir> or --project <path/to/project.p64proj>.",
+                "docs/docs/agent/ARCHITECTURE.md#31-project-format",
+            )
+        )
+        return None, None, None, issues
+
+    try:
+        config = read_json_file(config_path)
+    except Exception as exc:  # noqa: BLE001
+        issues.append(issue("error", "PROJECT", f"Could not parse project JSON: {exc}", "Fix project.p64proj JSON."))
+        return config_path.parent, config_path, None, issues
+
+    if not isinstance(config, dict):
+        issues.append(issue("error", "PROJECT", "project.p64proj must contain a JSON object."))
+        return config_path.parent, config_path, None, issues
+
+    return config_path.parent, config_path, config, issues
+
+
+def project_summary(project_root: Path, config_path: Path, config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "path": str(project_root),
+        "config_path": str(config_path),
+        "name": config.get("name", "New Project"),
+        "romName": config.get("romName", "pyrite64"),
+        "editorVersion": config.get("editorVersion", ""),
+        "sceneIdOnBoot": config.get("sceneIdOnBoot", 1),
+        "sceneIdOnReset": config.get("sceneIdOnReset", 1),
+        "sceneIdLastOpened": config.get("sceneIdLastOpened", 1),
+    }
+
+
+def iter_scene_files(project_root: Path) -> tuple[list[tuple[int, Path]], list[dict[str, str]]]:
+    issues: list[dict[str, str]] = []
+    scenes_root = project_root / "data" / "scenes"
+    if not scenes_root.exists():
+        issues.append(
+            issue(
+                "error",
+                "PROJECT",
+                f"Scene directory does not exist: {scenes_root}.",
+                "Open/save the project in BF64 or create data/scenes/<id>/scene.json.",
+                "docs/docs/agent/ARCHITECTURE.md#31-project-format",
+            )
+        )
+        return [], issues
+
+    scenes: list[tuple[int, Path]] = []
+    for entry in scenes_root.iterdir():
+        if not entry.is_dir():
+            continue
+        try:
+            scene_id = int(entry.name)
+        except ValueError:
+            continue
+        scenes.append((scene_id, entry / "scene.json"))
+    scenes.sort(key=lambda item: item[0])
+    return scenes, issues
+
+
+def component_name_list(components: list[Any]) -> list[str]:
+    names: list[str] = []
+    for comp in components:
+        if isinstance(comp, dict):
+            names.append(str(comp.get("name") or f"component:{comp.get('id', '?')}"))
+    return names
+
+
+def collect_object_stats(graph: Any) -> tuple[dict[str, Any], list[dict[str, str]], list[dict[str, Any]]]:
+    issues: list[dict[str, str]] = []
+    tree: list[dict[str, Any]] = []
+    stats: dict[str, Any] = {
+        "object_count": 0,
+        "component_count": 0,
+        "max_depth": 0,
+        "component_ids": {},
+        "duplicate_object_uuids": [],
+    }
+    seen_uuids: set[int] = set()
+
+    if not isinstance(graph, dict):
+        return stats, [issue("error", "SCENE", "Scene graph must be a JSON object.")], tree
+
+    children = graph.get("children", [])
+    if not isinstance(children, list):
+        return stats, [issue("error", "SCENE", "Scene graph children must be a JSON array.")], tree
+
+    def visit(obj: Any, depth: int, path: str) -> dict[str, Any] | None:
+        if not isinstance(obj, dict):
+            issues.append(issue("error", "SCENE", f"{path} must be a JSON object."))
+            return None
+
+        stats["object_count"] += 1
+        stats["max_depth"] = max(int(stats["max_depth"]), depth)
+        name = str(obj.get("name") or "(unnamed)")
+        uuid = obj.get("uuid")
+        if not isinstance(uuid, int):
+            issues.append(issue("error", "SCENE", f"{path} object '{name}' is missing an integer uuid."))
+        elif uuid in seen_uuids:
+            stats["duplicate_object_uuids"].append(uuid)
+            issues.append(issue("error", "SCENE", f"Duplicate scene object uuid {uuid}."))
+        else:
+            seen_uuids.add(uuid)
+
+        components = obj.get("components", [])
+        if not isinstance(components, list):
+            issues.append(issue("error", "SCENE", f"{path} object '{name}' components must be an array."))
+            components = []
+        for comp in components:
+            stats["component_count"] += 1
+            if not isinstance(comp, dict):
+                issues.append(issue("error", "SCENE", f"{path} object '{name}' has a non-object component."))
+                continue
+            comp_id = comp.get("id")
+            if not isinstance(comp_id, int) or comp_id < 0 or comp_id > MAX_COMPONENT_ID:
+                issues.append(
+                    issue(
+                        "error",
+                        "SCENE",
+                        f"{path} object '{name}' has invalid component id {comp_id}.",
+                        f"Use a component id in the editor/runtime registry range 0..{MAX_COMPONENT_ID}.",
+                        "docs/docs/agent/CODEMAP.md#component-system",
+                    )
+                )
+            else:
+                key = str(comp_id)
+                stats["component_ids"][key] = int(stats["component_ids"].get(key, 0)) + 1
+
+        node = {
+            "name": name,
+            "uuid": uuid,
+            "components": component_name_list(components),
+            "children": [],
+        }
+
+        child_list = obj.get("children", [])
+        if not isinstance(child_list, list):
+            issues.append(issue("error", "SCENE", f"{path} object '{name}' children must be an array."))
+            child_list = []
+        for idx, child in enumerate(child_list):
+            child_node = visit(child, depth + 1, f"{path}.children[{idx}]")
+            if child_node:
+                node["children"].append(child_node)
+        return node
+
+    for idx, child in enumerate(children):
+        node = visit(child, 1, f"graph.children[{idx}]")
+        if node:
+            tree.append(node)
+
+    return stats, issues, tree
+
+
+def validate_scene_doc(scene_path: Path, scene_id: int | None, doc: Any, limits: dict[str, Any]) -> dict[str, Any]:
+    issues: list[dict[str, str]] = []
+    if not isinstance(doc, dict):
+        return {
+            "ok": False,
+            "path": str(scene_path),
+            "kind": "scene",
+            "metadata": {"scene_id": scene_id},
+            "issues": [issue("error", "SCENE", "scene.json must contain a JSON object.")],
+        }
+
+    conf = doc.get("conf", {})
+    if not isinstance(conf, dict):
+        conf = {}
+        issues.append(issue("error", "SCENE", "scene.json conf must be a JSON object."))
+
+    graph = doc.get("graph")
+    if graph is None:
+        graph = {}
+        issues.append(issue("error", "SCENE", "scene.json is missing graph object."))
+
+    stats, graph_issues, tree = collect_object_stats(graph)
+    issues.extend(graph_issues)
+
+    max_objects = int(limits["scene"]["max_objects"])
+    if int(stats["object_count"]) > max_objects:
+        issues.append(
+            issue(
+                "error",
+                "S6",
+                f"Scene has {stats['object_count']} objects, exceeding the {max_objects} runtime id budget.",
+                "Split the scene or delete/merge objects.",
+                "docs/docs/n64/asset-checklist.md#scenes--prefabs-project-internal-assets",
+            )
+        )
+
+    pipeline = optional_int(conf.get("renderPipeline")) or 0
+    pipelines = limits["scene"]["pipelines"]
+    pipe_conf = pipelines.get(str(pipeline))
+    if pipe_conf is None:
+        issues.append(
+            issue(
+                "error",
+                "S1",
+                f"Unknown renderPipeline {conf.get('renderPipeline')}.",
+                "Use 0 (Default), 1 (HDR+Bloom), or 2 (BigTex).",
+                "docs/docs/n64/asset-checklist.md#scenes--prefabs-project-internal-assets",
+            )
+        )
+        pipe_name = "Unknown"
+    else:
+        pipe_name = str(pipe_conf["name"])
+        fb_width = optional_int(conf.get("fbWidth")) or 320
+        fb_height = optional_int(conf.get("fbHeight")) or 240
+        fb_format = optional_int(conf.get("fbFormat")) or 0
+
+        if "fb_width" in pipe_conf and fb_width != int(pipe_conf["fb_width"]):
+            issues.append(issue("error", "S1", f"{pipe_name} requires fbWidth {pipe_conf['fb_width']}; got {fb_width}."))
+        if "fb_height" in pipe_conf and fb_height != int(pipe_conf["fb_height"]):
+            issues.append(issue("error", "S1", f"{pipe_name} requires fbHeight {pipe_conf['fb_height']}; got {fb_height}."))
+        if "fb_format" in pipe_conf and fb_format != int(pipe_conf["fb_format"]):
+            issues.append(issue("error", "S2", f"{pipe_name} requires fbFormat {pipe_conf['fb_format']}; got {fb_format}."))
+        if "fb_formats" in pipe_conf and fb_format not in {int(v) for v in pipe_conf["fb_formats"]}:
+            issues.append(issue("error", "S2", f"{pipe_name} requires fbFormat in {pipe_conf['fb_formats']}; got {fb_format}."))
+        if pipeline == 2 and conf.get("doClearColor", True) is not False:
+            issues.append(
+                issue(
+                    "error",
+                    "S3",
+                    "BigTex scenes must set doClearColor false.",
+                    "Disable clear color or switch to Default/HDR+Bloom.",
+                    "docs/docs/n64/asset-checklist.md#scenes--prefabs-project-internal-assets",
+                )
+            )
+
+    audio_freq = optional_int(conf.get("audioFreq")) or 32000
+    if audio_freq not in {32000, 44100, 48000}:
+        issues.append(
+            issue(
+                "warning",
+                "S4",
+                f"audioFreq {audio_freq} is unusual; BF64 docs recommend 32000, 44100, or 48000.",
+                "Use 32000 unless the project has a specific audio reason.",
+                "docs/docs/n64/asset-checklist.md#scenes--prefabs-project-internal-assets",
+            )
+        )
+
+    metadata = {
+        "scene_id": scene_id,
+        "name": conf.get("name") or str(scene_id or scene_path.parent.name),
+        "renderPipeline": pipeline,
+        "renderPipelineName": pipe_name,
+        "fbWidth": optional_int(conf.get("fbWidth")) or 320,
+        "fbHeight": optional_int(conf.get("fbHeight")) or 240,
+        "fbFormat": optional_int(conf.get("fbFormat")) or 0,
+        "audioFreq": audio_freq,
+        **stats,
+    }
+
+    return {
+        "ok": not has_errors(issues),
+        "path": str(scene_path),
+        "kind": "scene",
+        "metadata": metadata,
+        "tree": tree,
+        "issues": issues,
+    }
+
+
+def load_scene_summary(scene_id: int, scene_path: Path, limits: dict[str, Any]) -> dict[str, Any]:
+    if not scene_path.exists():
+        return {
+            "ok": False,
+            "path": str(scene_path),
+            "kind": "scene",
+            "metadata": {"scene_id": scene_id, "name": str(scene_id)},
+            "tree": [],
+            "issues": [issue("error", "SCENE", f"Scene file does not exist: {scene_path}.")],
+        }
+    try:
+        doc = read_json_file(scene_path)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "path": str(scene_path),
+            "kind": "scene",
+            "metadata": {"scene_id": scene_id, "name": str(scene_id)},
+            "tree": [],
+            "issues": [issue("error", "SCENE", f"Could not parse scene JSON: {exc}", "Fix scene.json JSON.")],
+        }
+    return validate_scene_doc(scene_path, scene_id, doc, limits)
+
+
+def list_scene_summaries(project_root: Path, limits: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    scene_files, issues = iter_scene_files(project_root)
+    return [load_scene_summary(scene_id, path, limits) for scene_id, path in scene_files], issues
+
+
+def find_scene(project_root: Path, scene_ref: str, limits: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None, list[dict[str, str]]]:
+    summaries, issues = list_scene_summaries(project_root, limits)
+    if scene_ref.isdigit():
+        scene_id = int(scene_ref)
+        for summary in summaries:
+            if summary["metadata"].get("scene_id") == scene_id:
+                try:
+                    return summary, read_json_file(Path(summary["path"])), issues
+                except Exception as exc:  # noqa: BLE001
+                    issues.append(issue("error", "SCENE", f"Could not read scene {scene_ref}: {exc}"))
+                    return summary, None, issues
+
+    for summary in summaries:
+        if str(summary["metadata"].get("name", "")).lower() == scene_ref.lower():
+            try:
+                return summary, read_json_file(Path(summary["path"])), issues
+            except Exception as exc:  # noqa: BLE001
+                issues.append(issue("error", "SCENE", f"Could not read scene {scene_ref}: {exc}"))
+                return summary, None, issues
+
+    issues.append(
+        issue(
+            "error",
+            "SCENE",
+            f"Could not find scene '{scene_ref}'.",
+            "Use `bf64 scene ls --project <project>` to list available scene ids and names.",
+        )
+    )
+    return None, None, issues
+
+
+def validate_project_file(path: Path, limits: dict[str, Any]) -> dict[str, Any]:
+    project_root, config_path, config, issues = resolve_project(str(path))
+    if project_root is None or config_path is None or config is None:
+        return {"ok": False, "path": str(path), "kind": "project", "metadata": {}, "scenes": [], "issues": issues}
+
+    scenes, scene_dir_issues = list_scene_summaries(project_root, limits)
+    issues.extend(scene_dir_issues)
+    scene_ids = {s["metadata"].get("scene_id") for s in scenes}
+    for key in ("sceneIdOnBoot", "sceneIdOnReset", "sceneIdLastOpened"):
+        value = config.get(key, 1)
+        if value not in scene_ids:
+            issues.append(
+                issue(
+                    "error",
+                    "PROJECT",
+                    f"{key} points to missing scene id {value}.",
+                    "Create that scene or update project.p64proj to an existing scene id.",
+                    "docs/docs/agent/ARCHITECTURE.md#31-project-format",
+                )
+            )
+
+    for scene in scenes:
+        issues.extend(
+            issue(
+                item["severity"],
+                item["rule"],
+                f"Scene {scene['metadata'].get('scene_id')}: {item['message']}",
+                item.get("fix", ""),
+                item.get("source", ""),
+            )
+            for item in scene.get("issues", [])
+        )
+
+    return {
+        "ok": not has_errors(issues),
+        "path": str(config_path),
+        "kind": "project",
+        "metadata": project_summary(project_root, config_path, config),
+        "scene_count": len(scenes),
+        "scenes": [
+            {
+                "id": s["metadata"].get("scene_id"),
+                "name": s["metadata"].get("name"),
+                "path": s["path"],
+                "ok": s["ok"],
+                "object_count": s["metadata"].get("object_count", 0),
+                "component_count": s["metadata"].get("component_count", 0),
+                "issues": s.get("issues", []),
+            }
+            for s in scenes
+        ],
+        "issues": issues,
+    }
+
+
+def validate_scene_file(path: Path, limits: dict[str, Any]) -> dict[str, Any]:
+    try:
+        doc = read_json_file(path)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "path": str(path),
+            "kind": "scene",
+            "metadata": {},
+            "issues": [issue("error", "SCENE", f"Could not parse scene JSON: {exc}", "Fix scene.json JSON.")],
+        }
+    scene_id = optional_int(path.parent.name)
+    return validate_scene_doc(path, scene_id, doc, limits)
 
 
 def validate_texture(
@@ -724,6 +1136,10 @@ def validate_font(path: Path, conf_path: str | None) -> dict[str, Any]:
 def classify_asset(path: Path) -> str:
     lower = path.name.lower()
     ext = path.suffix.lower()
+    if ext == ".p64proj":
+        return "project"
+    if lower == "scene.json":
+        return "scene"
     if ext == ".png":
         return "texture"
     if ext in {".glb", ".gltf"}:
@@ -765,6 +1181,10 @@ def validate_asset(args: argparse.Namespace) -> int:
         result = validate_audio(path, conf, conf_path, args, limits)
     elif kind == "font":
         result = validate_font(path, conf_path)
+    elif kind == "project":
+        result = validate_project_file(path, limits)
+    elif kind == "scene":
+        result = validate_scene_file(path, limits)
     else:
         result = {
             "ok": False,
@@ -776,7 +1196,7 @@ def validate_asset(args: argparse.Namespace) -> int:
                     "error",
                     "TYPE",
                     f"Unsupported or unknown asset type for {path.name}.",
-                    "Use --kind texture|model|audio|font, or validate a supported asset extension.",
+                    "Use --kind texture|model|audio|font|project|scene, or validate a supported asset extension.",
                 )
             ],
         }
@@ -785,6 +1205,226 @@ def validate_asset(args: argparse.Namespace) -> int:
     if args.record:
         record_operation("validate", path, result)
     return 1 if has_errors(result.get("issues", [])) else 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    issues: list[dict[str, str]] = []
+    checks: list[dict[str, Any]] = []
+
+    def add_check(name: str, ok: bool, detail: str, severity: str = "error", fix: str = "") -> None:
+        checks.append({"name": name, "ok": ok, "detail": detail})
+        if not ok:
+            issues.append(issue(severity, "DOCTOR", detail, fix))
+
+    add_check(
+        "python",
+        sys.version_info >= (3, 10),
+        f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        "error",
+        "Use Python 3.10 or newer.",
+    )
+    add_check("repo_root", REPO_ROOT.exists(), str(REPO_ROOT), "error")
+    try:
+        load_limits()
+        add_check("limits_json", True, str(LIMITS_PATH))
+    except Exception as exc:  # noqa: BLE001
+        add_check("limits_json", False, f"Could not load {LIMITS_PATH}: {exc}", "error", "Fix limits.json.")
+
+    for tool in ("git", "make"):
+        path = shutil.which(tool)
+        add_check(tool, path is not None, path or f"{tool} not found on PATH", "warning", f"Install {tool} or add it to PATH.")
+
+    n64_inst = os.environ.get("N64_INST", "")
+    add_check(
+        "N64_INST",
+        bool(n64_inst),
+        n64_inst or "N64_INST is not set",
+        "warning",
+        "Set N64_INST to the libdragon toolchain install path before building ROMs.",
+    )
+    for tool in ("mksprite", "audioconv64", "n64tool"):
+        path = shutil.which(tool)
+        add_check(
+            tool,
+            path is not None,
+            path or f"{tool} not found on PATH",
+            "warning",
+            f"Install/build the libdragon toolchain so {tool} is on PATH.",
+        )
+
+    emulators = {name: shutil.which(name) for name in ("ares", "gopher64")}
+    add_check(
+        "emulator",
+        any(emulators.values()),
+        ", ".join(f"{name}={path or 'missing'}" for name, path in emulators.items()),
+        "warning",
+        "Install ares or gopher64 for hardware-accurate run checks.",
+    )
+
+    if args.strict:
+        for item in issues:
+            if item["severity"] == "warning":
+                item["severity"] = "error"
+
+    result = {
+        "ok": not has_errors(issues),
+        "command": "doctor",
+        "metadata": {"repo_root": str(REPO_ROOT), "strict": args.strict},
+        "checks": checks,
+        "issues": issues,
+    }
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        output_result(result, False)
+        for check in checks:
+            status = "OK" if check["ok"] else "MISSING"
+            print(f"{status} {check['name']}: {check['detail']}")
+    return 2 if has_errors(issues) else 0
+
+def cmd_scene_ls(args: argparse.Namespace) -> int:
+    limits = load_limits()
+    project_root, config_path, config, issues = resolve_project(args.project)
+    if project_root is None or config_path is None or config is None:
+        result = {"ok": False, "command": "scene ls", "project": args.project, "scenes": [], "issues": issues}
+        output_scene_result(result, args.json)
+        return 1
+
+    scenes, scene_issues = list_scene_summaries(project_root, limits)
+    issues.extend(scene_issues)
+    result = {
+        "ok": not has_errors(issues) and not any(not scene.get("ok", False) for scene in scenes),
+        "command": "scene ls",
+        "project": project_summary(project_root, config_path, config),
+        "scenes": [
+            {
+                "id": scene["metadata"].get("scene_id"),
+                "name": scene["metadata"].get("name"),
+                "path": scene["path"],
+                "ok": scene["ok"],
+                "renderPipeline": scene["metadata"].get("renderPipeline"),
+                "renderPipelineName": scene["metadata"].get("renderPipelineName"),
+                "object_count": scene["metadata"].get("object_count"),
+                "component_count": scene["metadata"].get("component_count"),
+                "issues": scene.get("issues", []),
+            }
+            for scene in scenes
+        ],
+        "issues": issues,
+    }
+    output_scene_result(result, args.json)
+    return 1 if not result["ok"] else 0
+
+
+def cmd_scene_show(args: argparse.Namespace) -> int:
+    limits = load_limits()
+    project_root, config_path, config, issues = resolve_project(args.project)
+    if project_root is None or config_path is None or config is None:
+        result = {"ok": False, "command": "scene show", "project": args.project, "issues": issues}
+        output_scene_result(result, args.json)
+        return 1
+
+    summary, doc, find_issues = find_scene(project_root, args.scene, limits)
+    issues.extend(find_issues)
+    if summary is None or doc is None:
+        result = {
+            "ok": False,
+            "command": "scene show",
+            "project": project_summary(project_root, config_path, config),
+            "scene": args.scene,
+            "issues": issues,
+        }
+        output_scene_result(result, args.json)
+        return 1
+
+    issues.extend(summary.get("issues", []))
+    result = {
+        "ok": not has_errors(issues),
+        "command": "scene show",
+        "project": project_summary(project_root, config_path, config),
+        "scene": summary,
+        "doc": doc,
+        "issues": issues,
+    }
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print_scene_show(result, args.depth)
+    return 1 if has_errors(issues) else 0
+
+
+def cmd_scene_validate(args: argparse.Namespace) -> int:
+    limits = load_limits()
+    project_root, config_path, config, issues = resolve_project(args.project)
+    if project_root is None or config_path is None or config is None:
+        result = {"ok": False, "command": "scene validate", "project": args.project, "issues": issues}
+        output_scene_result(result, args.json)
+        return 1
+
+    if args.scene:
+        summary, _doc, find_issues = find_scene(project_root, args.scene, limits)
+        issues.extend(find_issues)
+        if summary:
+            issues.extend(summary.get("issues", []))
+        result = {
+            "ok": summary is not None and not has_errors(issues),
+            "command": "scene validate",
+            "project": project_summary(project_root, config_path, config),
+            "scene": summary,
+            "issues": issues,
+        }
+    else:
+        result = validate_project_file(config_path, limits)
+        result["command"] = "scene validate"
+    output_scene_result(result, args.json)
+    return 1 if not result.get("ok") else 0
+
+
+def output_scene_result(result: dict[str, Any], as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return
+    output_result(result, False)
+    project = result.get("project")
+    if isinstance(project, dict):
+        print(f"Project: {project.get('name')} ({project.get('path')})")
+    for scene in result.get("scenes", []):
+        status = "OK" if scene.get("ok") else "FAILED"
+        print(
+            f"{status} scene {scene.get('id')}: {scene.get('name')} "
+            f"objects={scene.get('object_count')} components={scene.get('component_count')} "
+            f"pipeline={scene.get('renderPipelineName')}"
+        )
+        for item in scene.get("issues", []):
+            print(f"  {item.get('severity', 'info').upper()} {item.get('rule')}: {item.get('message')}")
+
+
+def print_scene_show(result: dict[str, Any], depth: int) -> None:
+    scene = result["scene"]
+    meta = scene["metadata"]
+    print(f"Scene {meta.get('scene_id')}: {meta.get('name')}")
+    print(f"Path: {scene.get('path')}")
+    print(
+        f"Pipeline: {meta.get('renderPipelineName')} ({meta.get('renderPipeline')}) "
+        f"{meta.get('fbWidth')}x{meta.get('fbHeight')} fbFormat={meta.get('fbFormat')}"
+    )
+    print(f"Objects: {meta.get('object_count')}  Components: {meta.get('component_count')}")
+    for item in result.get("issues", []):
+        print(f"{item.get('severity', 'info').upper()} {item.get('rule')}: {item.get('message')}")
+    if depth == 0:
+        return
+    print("Object tree:")
+
+    def emit(nodes: list[dict[str, Any]], current_depth: int) -> None:
+        if current_depth > depth:
+            return
+        for node in nodes:
+            comps = ", ".join(node.get("components", []))
+            comp_text = f" [{comps}]" if comps else ""
+            print(f"{'  ' * (current_depth - 1)}- {node.get('name')}{comp_text}")
+            emit(node.get("children", []), current_depth + 1)
+
+    emit(scene.get("tree", []), 1)
 
 
 def cmd_constraints(args: argparse.Namespace) -> int:
@@ -868,14 +1508,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bf64", description="Agent-first BF64 utility surface")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    doctor = sub.add_parser("doctor", help="Check local BF64 agent/tooling environment")
+    doctor.add_argument("--strict", action="store_true", help="Treat missing optional build/run tools as errors")
+    doctor.add_argument("--json", action="store_true", help="Emit stable JSON")
+    doctor.set_defaults(func=cmd_doctor)
+
     constraints = sub.add_parser("constraints", help="Query machine-readable N64/BF64 limits")
     constraints.add_argument("topic", nargs="?", default="list", help="list, texture, model, audio, scene, rom, or exit_codes")
     constraints.add_argument("--json", action="store_true", help="Emit stable JSON")
     constraints.set_defaults(func=cmd_constraints)
 
-    validate = sub.add_parser("validate", help="Validate one asset against BF64/N64 constraints")
-    validate.add_argument("path", help="Asset path")
-    validate.add_argument("--kind", choices=["texture", "model", "audio", "font"], help="Override asset kind")
+    validate = sub.add_parser("validate", help="Validate one asset, project, or scene against BF64/N64 constraints")
+    validate.add_argument("path", help="Asset path, project.p64proj, or scene.json")
+    validate.add_argument("--kind", choices=["texture", "model", "audio", "font", "project", "scene"], help="Override input kind")
     validate.add_argument("--conf", help="Explicit .conf sidecar path")
     validate.add_argument("--json", action="store_true", help="Emit stable JSON")
     validate.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
@@ -883,6 +1528,26 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--scene-pipeline", help="default, hdr, bigtex, or 0/1/2")
     validate.add_argument("--role", choices=["sfx", "music", "voice", "unknown"], default="unknown", help="Audio role hint")
     validate.set_defaults(func=validate_asset)
+
+    scene = sub.add_parser("scene", help="Read and validate project scenes")
+    scene_sub = scene.add_subparsers(dest="scene_command", required=True)
+    scene_ls = scene_sub.add_parser("ls", help="List scenes in a BF64 project")
+    scene_ls.add_argument("--project", default=".", help="Project directory or project.p64proj path")
+    scene_ls.add_argument("--json", action="store_true", help="Emit stable JSON")
+    scene_ls.set_defaults(func=cmd_scene_ls)
+
+    scene_show = scene_sub.add_parser("show", help="Show one scene by id or exact name")
+    scene_show.add_argument("scene", help="Scene id or exact scene name")
+    scene_show.add_argument("--project", default=".", help="Project directory or project.p64proj path")
+    scene_show.add_argument("--depth", type=int, default=3, help="Human-readable object tree depth; 0 hides tree")
+    scene_show.add_argument("--json", action="store_true", help="Emit stable JSON including the raw scene document")
+    scene_show.set_defaults(func=cmd_scene_show)
+
+    scene_validate = scene_sub.add_parser("validate", help="Validate one scene or all scenes in a BF64 project")
+    scene_validate.add_argument("scene", nargs="?", help="Optional scene id or exact scene name")
+    scene_validate.add_argument("--project", default=".", help="Project directory or project.p64proj path")
+    scene_validate.add_argument("--json", action="store_true", help="Emit stable JSON")
+    scene_validate.set_defaults(func=cmd_scene_validate)
 
     history = sub.add_parser("history", help="Read local BF64 operation history")
     history_sub = history.add_subparsers(dest="history_command", required=True)

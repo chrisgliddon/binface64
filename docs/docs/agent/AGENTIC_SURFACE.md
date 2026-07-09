@@ -15,6 +15,8 @@ This page records the first machine-facing BF64 surface: structured N64 constrai
 | `docs/docs/n64/limits.json` | Machine-readable version of the most important N64/BF64 limits. This is the source for validators and future MCP constraint tools. |
 | `tools/bf64.py` | No-dependency seed CLI for constraint lookup, asset preflight validation, and operation history. |
 | `.bf64/operations.jsonl` | Local, ignored audit log written by `tools/bf64.py validate --record`. |
+| `tests/test_bf64_cli.py` | Fixture tests for the JSON contract and core validator behavior. |
+| `.github/workflows/bf64-cli.yml` | CI job for JSON validity, CLI compilation, and unit tests. |
 
 The Markdown docs remain the human-readable ground truth. `limits.json` is the agent-oriented index for constraints that must be mechanically enforced.
 
@@ -42,6 +44,18 @@ Validate one asset:
 python3 tools/bf64.py validate n64/examples/bigtex/assets/img00.bci.png --scene-pipeline bigtex --json
 python3 tools/bf64.py validate n64/examples/jam25/assets/lab/floor00.ci4.png --texture-format CI4 --json
 python3 tools/bf64.py validate n64/examples/jam25/assets/PlayerJump00.wav --role sfx --json
+python3 tools/bf64.py validate n64/examples/empty/project.p64proj --json
+python3 tools/bf64.py validate n64/examples/empty/data/scenes/1/scene.json --json
+```
+
+Inspect projects and scenes:
+
+```bash
+python3 tools/bf64.py doctor --json
+python3 tools/bf64.py doctor --strict --json
+python3 tools/bf64.py scene ls --project n64/examples/empty --json
+python3 tools/bf64.py scene show 1 --project n64/examples/empty --json
+python3 tools/bf64.py scene validate --project n64/examples/empty --json
 ```
 
 Record an operation and inspect history:
@@ -98,11 +112,16 @@ Model checks include `.glb`/`.gltf` parsing, total vertex/index counts, Fast64 `
 
 Audio checks include BF64 editor-supported extensions, `wavCompression`, `wavResampleRate`, WAV metadata, MP3 re-encode notice, XM channel cap, and common SFX mono warnings.
 
+Project checks include parseability, `sceneIdOnBoot` / `sceneIdOnReset` / `sceneIdLastOpened` references, and per-scene validation.
+
+Scene checks include `conf` / `graph` structure, object count budget, duplicate object UUIDs, component id range, render pipeline framebuffer constraints, BigTex `doClearColor: false`, and unusual audio frequencies.
+
 Known limits:
 
 - This is preflight validation. The tiny3d importer, mksprite, audioconv64, and a real ROM build remain the source of truth for deep pipeline assertions.
 - The model validator cannot prove the optimized retained-animation keyframe delta stays below 32768 ticks without running the tiny3d importer.
 - The validator does not yet import assets, mutate scenes, build ROMs, or launch emulators.
+- `doctor` distinguishes default warnings from `--strict` environment errors. Missing N64 toolchain pieces do not block asset/scene validation.
 
 ---
 
@@ -119,8 +138,8 @@ Known limits:
 ## Expansion Backlog
 
 - Promote the seed CLI into the formal Phase 5 `bf64` command surface or add a wrapper entry point.
-- Add `doctor`, `new`, `build`, `run`, `import`, `scene ls`, and `scene show`.
-- Add fixture-based tests for validator behavior and JSON compatibility.
+- Add `new`, `build`, `run`, `import`, and `project status`.
 - Wrap `tools/bf64.py` from the Phase 6 MCP server instead of duplicating validation logic.
-- Add structured scene/project schemas for read-only queries first, then mutation through extensions.
+- Expand structured scene/project schemas and preserve JSON compatibility with tests.
 - Add operation ids, command arguments, tool version, and repo revision to `.bf64/operations.jsonl`.
+- Decide whether duplicate scene UUID repair should be an explicit CLI command or only an editor action.
