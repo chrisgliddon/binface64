@@ -2,8 +2,8 @@
 
 **Repo:** `https://github.com/chrisgliddon/binface64` (fork of `HailToDodongo/pyrite64`)
 **Current branch:** `main`
-**Last session:** Read-only asset inventory + bulk asset validation (2026-07-09)
-**Next session:** Phase 5 seed CLI — add read-only/dry-run `build` planning before `run`, `new`, or `import`
+**Last session:** Dry-run build planner (2026-07-09)
+**Next session:** Phase 5 seed CLI — add explicit executable `build` mode, then `run`
 
 This is the **only** memory between sessions. Read it first. Update it before ending a session.
 
@@ -26,7 +26,7 @@ This is the **only** memory between sessions. Read it first. Update it before en
 | 2 | Asset requirements & limitations | ✅ Done | (this session) | ~moderate | 5 docs in docs/docs/n64/: textures, models-and-meshes, audio-assets, rom-budgets, asset-checklist. n64.rst toctree updated. 3 parallel explore subagents over vendored tiny3d gltf_importer, libdragon audioconv64/mixer, mksprite/rdpq_tex/BCI. Both Phase 0 open questions #8 (glTF material set) and #9 (audioconv64 .mp3) resolved. Sphinx build verified (3 pre-existing warnings, none new). |
 | 3 | `/skills` scaffold + core engine skills | ⬜ Not started | — | ~300K est | Next session. See kickoff prompt in `phased-plan.md` Phase 3. |
 | 4 | Asset & content pipeline skills | ⬜ Not started | — | ~300K est | |
-| 5 | `bf64` CLI | 🌱 Seeded | (this session) | ~400K est | Out-of-order seed now includes root `./bf64`, `--version`, `doctor`, `project status`, asset/project/scene validation, read-only `asset ls/show/validate-all`, read-only `scene ls/show/validate`, history schema v2, fixture tests, and CLI CI. Not the full Phase 5 CLI yet. |
+| 5 | `bf64` CLI | 🌱 Seeded | (this session) | ~400K est | Out-of-order seed now includes root `./bf64`, `--version`, `doctor`, `project status`, dry-run `build` planning, asset/project/scene validation, read-only `asset ls/show/validate-all`, read-only `scene ls/show/validate`, history schema v2, fixture tests, and CLI CI. Not the full Phase 5 CLI yet. |
 | 6 | MCP server | ⬜ Not started | — | ~400K est | |
 | 7 | Extensions system | ⬜ Not started | — | ~400K est (splittable 7a/7b) | |
 | 8 | CONTRIBUTING.md, vision, agent onboarding | ⬜ Not started | — | ~250K est | |
@@ -37,6 +37,51 @@ This is the **only** memory between sessions. Read it first. Update it before en
 - All N64 technical claims cite `docs/docs/n64/`; all API claims are verified against source.
 - Upstream Pyrite64 credits stay intact; divergence is tracked in `docs/docs/agent/DIVERGENCE.md`.
 - Every new capability ships with a matching skill in `/skills`.
+
+---
+
+## What this session (dry-run build planner) completed
+
+This session added `./bf64 build` as a read-only build plan rather than an executor. It gives agents the same build-shape information the editor uses without creating `Makefile`, `filesystem/`, `build/`, `src/p64`, `engine/`, or ROM artifacts.
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `tools/bf64.py` | Bumped CLI to `0.5.0`; added dry-run `build`, project-specific toolchain checks, expected ROM/Makefile/source/binary/asset artifact planning, bootstrap-file reporting, `--strict-toolchain`, and build history artifact records. |
+| `tests/test_bf64_cli.py` | Added tests for dry-run build JSON and strict missing-toolchain exit code 2; factored a minimal project fixture helper. |
+| `docs/docs/agent/AGENTIC_SURFACE.md` | Documented `build`, `--strict-toolchain`, planned artifacts, and the fact that executable ROM builds are not wired yet. |
+| `docs/docs/agent/HANDOFF.md` | Recorded this session and updated the Phase 5 seed status. |
+
+### Current preferred commands
+
+- `./bf64 --version`
+- `./bf64 doctor --json`
+- `./bf64 project status --project n64/examples/empty --json`
+- `./bf64 build --project n64/examples/empty --json`
+- `./bf64 build --project n64/examples/empty --strict-toolchain --json`
+- `./bf64 asset ls --project n64/examples/empty --json`
+- `./bf64 asset validate-all --project n64/examples/empty --json`
+- `./bf64 scene ls --project n64/examples/empty --json`
+- `./bf64 history list --json`
+
+### Verification
+
+- `python3 -m py_compile bf64 tools/bf64.py`
+- `python3 -m unittest discover -s tests -p 'test_*.py'`
+- `./bf64 build --project n64/examples/empty --json`
+- `./bf64 build --project n64/examples/empty --strict-toolchain --json` returns exit code 2 when SDK pieces are missing
+- `PYRITE_DOCS_SKIP_DOXYGEN=1 .venv/bin/sphinx-build -b html . _build/html` (same pre-existing warnings only)
+
+### Remaining Phase 5 gaps
+
+- Add explicit executable build mode, probably `./bf64 build --execute --project ...`, that calls the existing Pyrite64 CLI build path or faithfully reproduces it. Keep dry-run as the default.
+- Decide how to locate the Pyrite64 editor binary for `--execute`; the generated Makefile expects `P64_SELF_PATH`, and `src/cli.cpp` supports `<pyrite64-binary> --cli --cmd build <project.p64proj>`.
+- After executable build is reliable, add `run` using the project `pathEmu` and the final `<romName>.z64`.
+- `new`, then `import`.
+- Dedicated prefab and node-graph validators, likely after Phase 3 skills clarify the node graph API and generated C++ shape.
+- Explicit duplicate UUID repair command, with backups and history records.
+- Eventually split `tools/bf64.py` into modules once command count grows again.
 
 ---
 
@@ -75,7 +120,7 @@ This session added the first project asset surface on top of the validator primi
 
 ### Remaining Phase 5 gaps
 
-- `build` next. Start with a read-only/dry-run build plan that resolves project config, asset validation summary, toolchain readiness, output ROM path, and expected generated artifacts before invoking make/toolchain commands.
+- Executable `build` next, using the dry-run plan as the preflight gate.
 - Then `run` after `build` can report or create a ROM artifact.
 - `new`, then `import`.
 - Dedicated prefab and node-graph validators, likely after Phase 3 skills clarify the node graph API and generated C++ shape.

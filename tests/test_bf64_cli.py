@@ -33,6 +33,21 @@ class Bf64CliTests(unittest.TestCase):
         ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
         path.write_bytes(b"\x89PNG\r\n\x1a\n" + struct.pack(">I4s", 13, b"IHDR") + ihdr)
 
+    def write_minimal_project(self, project: Path, extra_config: dict | None = None) -> None:
+        (project / "data" / "scenes" / "1").mkdir(parents=True)
+        config = {
+            "name": "Fixture",
+            "romName": "fixture",
+            "sceneIdOnBoot": 1,
+            "sceneIdOnReset": 1,
+            "sceneIdLastOpened": 1,
+        }
+        if extra_config:
+            config.update(extra_config)
+        (project / "project.p64proj").write_text(json.dumps(config), encoding="utf-8")
+        scene = {"conf": {"name": "Scene", "renderPipeline": 0}, "graph": {"children": []}}
+        (project / "data" / "scenes" / "1" / "scene.json").write_text(json.dumps(scene), encoding="utf-8")
+
     def test_constraints_list_json(self) -> None:
         proc, data = self.run_json("constraints", "list", "--json")
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -85,6 +100,31 @@ class Bf64CliTests(unittest.TestCase):
         skipped = [item for item in data["results"] if item["metadata"].get("skipped")]
         self.assertEqual(skipped[0]["kind"], "unknown")
 
+    def test_build_plan_empty_project_is_dry_run(self) -> None:
+        proc, data = self.run_json("build", "--project", "n64/examples/empty", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertTrue(data["dry_run"])
+        self.assertEqual(data["mode"], "dry_run")
+        self.assertEqual(data["plan"]["rom"]["path"], "n64/examples/empty/p64_project.z64")
+        self.assertEqual(data["validation"]["assets"]["validated"], 2)
+        self.assertEqual(data["validation"]["assets"]["skipped"], 1)
+        artifact_kinds = {artifact["kind"] for artifact in data["artifacts"]}
+        self.assertIn("rom", artifact_kinds)
+        self.assertIn("asset_texture", artifact_kinds)
+        self.assertIn("scene_binary", artifact_kinds)
+        self.assertIn("make", {check["name"] for check in data["toolchain"]["checks"]})
+
+    def test_build_plan_strict_toolchain_uses_exit_code_2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            self.write_minimal_project(project, {"pathN64Inst": str(project / "missing-sdk")})
+            proc, data = self.run_json("build", "--project", str(project), "--strict-toolchain", "--json")
+
+        self.assertEqual(proc.returncode, 2)
+        self.assertFalse(data["ok"])
+        self.assertTrue(any(item["rule"] == "BUILD_TOOLCHAIN" for item in data["issues"]))
+
     def test_scene_ls_empty_project(self) -> None:
         proc, data = self.run_json("scene", "ls", "--project", "n64/examples/empty", "--json")
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -113,19 +153,7 @@ class Bf64CliTests(unittest.TestCase):
     def test_project_validation_catches_duplicate_scene_uuid(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
-            (project / "data" / "scenes" / "1").mkdir(parents=True)
-            (project / "project.p64proj").write_text(
-                json.dumps(
-                    {
-                        "name": "Fixture",
-                        "romName": "fixture",
-                        "sceneIdOnBoot": 1,
-                        "sceneIdOnReset": 1,
-                        "sceneIdLastOpened": 1,
-                    }
-                ),
-                encoding="utf-8",
-            )
+            self.write_minimal_project(project)
             scene = {
                 "conf": {"name": "Scene", "renderPipeline": 0},
                 "graph": {

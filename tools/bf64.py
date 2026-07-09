@@ -27,10 +27,20 @@ LIMITS_PATH = REPO_ROOT / "docs" / "docs" / "n64" / "limits.json"
 DEFAULT_HISTORY_PATH = REPO_ROOT / ".bf64" / "operations.jsonl"
 PROJECT_FILENAME = "project.p64proj"
 MAX_COMPONENT_ID = 12
-CLI_VERSION = "0.4.0"
+CLI_VERSION = "0.5.0"
 HISTORY_SCHEMA_VERSION = 2
 VALIDATABLE_ASSET_KINDS = {"texture", "model", "audio", "font"}
 PROJECT_ASSET_KINDS = ("texture", "model", "audio", "font", "prefab", "node_graph", "unknown")
+BUILD_TOOLCHAIN_FILES = (
+    ("n64.mk", "include/n64.mk"),
+    ("t3d.mk", "include/t3d.mk"),
+    ("mkasset", "bin/mkasset"),
+    ("mksprite", "bin/mksprite"),
+    ("audioconv64", "bin/audioconv64"),
+    ("mkfont", "bin/mkfont"),
+    ("mkdfs", "bin/mkdfs"),
+    ("n64tool", "bin/n64tool"),
+)
 
 
 def load_limits() -> dict[str, Any]:
@@ -1469,6 +1479,328 @@ def cmd_project_status(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def artifact_entry(path: Path, kind: str, expected: bool = True) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "kind": kind,
+        "path": str(path),
+        "expected": expected,
+        "exists": path.exists(),
+    }
+    if path.exists() and path.is_file():
+        try:
+            entry["size_bytes"] = path.stat().st_size
+        except OSError:
+            pass
+    return entry
+
+
+def build_toolchain_status(config: dict[str, Any], strict: bool = False) -> dict[str, Any]:
+    project_n64_inst = str(config.get("pathN64Inst") or "")
+    env_n64_inst = os.environ.get("N64_INST", "")
+    effective_n64_inst = project_n64_inst or env_n64_inst
+    severity = "error" if strict else "warning"
+    checks: list[dict[str, Any]] = []
+    issues: list[dict[str, str]] = []
+
+    def add_check(name: str, ok: bool, detail: str, fix: str = "") -> None:
+        checks.append({"name": name, "ok": ok, "detail": detail})
+        if not ok:
+            issues.append(issue(severity, "BUILD_TOOLCHAIN", detail, fix))
+
+    make_path = shutil.which("make")
+    add_check("make", make_path is not None, make_path or "make not found on PATH", "Install make or add it to PATH.")
+
+    if effective_n64_inst:
+        n64_inst_path = Path(effective_n64_inst)
+        add_check(
+            "N64_INST",
+            n64_inst_path.exists(),
+            str(n64_inst_path) if n64_inst_path.exists() else f"N64_INST path does not exist: {n64_inst_path}",
+            "Set project pathN64Inst or N64_INST to a valid libdragon toolchain path.",
+        )
+    else:
+        add_check(
+            "N64_INST",
+            False,
+            "No project pathN64Inst and N64_INST is not set",
+            "Set N64_INST or project pathN64Inst before running a real ROM build.",
+        )
+
+    for name, rel in BUILD_TOOLCHAIN_FILES:
+        if not effective_n64_inst:
+            add_check(name, False, f"{name} cannot be checked because N64_INST is not configured.")
+            continue
+        expected = Path(effective_n64_inst) / rel
+        add_check(name, expected.exists(), str(expected), f"Install/build the libdragon SDK so {rel} exists.")
+
+    return {
+        "strict": strict,
+        "project_pathN64Inst": project_n64_inst,
+        "env_N64_INST": env_n64_inst,
+        "effective_N64_INST": effective_n64_inst,
+        "build_ready": not any(not check.get("ok", False) for check in checks),
+        "checks": checks,
+        "issues": issues,
+    }
+
+
+def build_scene_artifacts(project_root: Path, scenes: list[tuple[int, Path]]) -> list[dict[str, Any]]:
+    artifacts: list[dict[str, Any]] = []
+    for scene_id, _path in scenes:
+        stem = f"s{scene_id:04d}"
+        artifacts.append(artifact_entry(project_root / "filesystem" / "p64" / stem, "scene_binary"))
+        artifacts.append(artifact_entry(project_root / "filesystem" / "p64" / f"{stem}o", "scene_objects"))
+    return artifacts
+
+
+def build_asset_output_plan(project_root: Path, assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    outputs: list[dict[str, Any]] = []
+    for entry in assets:
+        if entry.get("exclude"):
+            continue
+        out_path = entry.get("out_path")
+        if not out_path:
+            continue
+        outputs.append(
+            {
+                "kind": entry.get("kind"),
+                "source": entry.get("relative_path"),
+                "out_path": out_path,
+                "rom_path": entry.get("rom_path"),
+                "exists": (project_root / str(out_path)).exists(),
+            }
+        )
+    outputs.sort(key=lambda item: str(item.get("out_path", "")))
+    return outputs
+
+
+def build_node_graph_source_artifacts(project_root: Path, assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    artifacts: list[dict[str, Any]] = []
+    for entry in assets:
+        if entry.get("kind") != "node_graph" or entry.get("exclude"):
+            continue
+        uuid_value = optional_int(entry.get("uuid"))
+        if uuid_value is None or uuid_value == 0:
+            continue
+        artifacts.append(artifact_entry(project_root / "src" / "p64" / f"{uuid_value:016x}.cpp", "node_graph_source"))
+    return artifacts
+
+
+def build_bootstrap_plan(project_root: Path) -> dict[str, Any]:
+    directories = [
+        project_root / "data",
+        project_root / "data" / "scenes",
+        project_root / "assets",
+        project_root / "assets" / "p64",
+        project_root / "src",
+        project_root / "src" / "p64",
+        project_root / "src" / "user",
+        project_root / "filesystem" / "p64",
+        project_root / "build",
+        project_root / "engine",
+        project_root / "metadata",
+    ]
+    files = [
+        project_root / ".gitignore",
+        project_root / "Makefile.custom",
+        project_root / "assets" / "p64" / "font.ia4.png",
+    ]
+    return {
+        "directories": [{"path": str(path), "exists": path.exists()} for path in directories],
+        "files": [{"path": str(path), "exists": path.exists()} for path in files],
+        "note": "The editor Project constructor creates missing bootstrap files; dry-run does not mutate them.",
+    }
+
+
+def build_expected_artifacts(
+    project_root: Path,
+    config: dict[str, Any],
+    scenes: list[tuple[int, Path]],
+    assets: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rom_name = str(config.get("romName") or "pyrite64")
+    artifacts = [
+        artifact_entry(project_root / f"{rom_name}.z64", "rom"),
+        artifact_entry(project_root / "build" / f"{rom_name}.dfs", "dfs_image"),
+        artifact_entry(project_root / "build" / f"{rom_name}.elf", "elf"),
+        artifact_entry(project_root / "Makefile", "generated_makefile"),
+        artifact_entry(project_root / "filesystem" / "p64" / "a", "asset_table_binary"),
+        artifact_entry(project_root / "filesystem" / "p64" / "conf", "project_runtime_conf"),
+        artifact_entry(project_root / "filesystem" / "p64" / "fileList.txt", "asset_file_list"),
+        artifact_entry(project_root / "filesystem" / "p64" / "font.ia4.sprite", "builtin_font_sprite"),
+        artifact_entry(project_root / "src" / "p64" / "assetTable.h", "generated_source"),
+        artifact_entry(project_root / "src" / "p64" / "sceneTable.h", "generated_source"),
+        artifact_entry(project_root / "src" / "p64" / "sceneTable.cpp", "generated_source"),
+        artifact_entry(project_root / "src" / "p64" / "scriptTable.cpp", "generated_source"),
+        artifact_entry(project_root / "src" / "p64" / "globalScriptTable.cpp", "generated_source"),
+    ]
+    if (config.get("metadata") or {}).get("enabled"):
+        artifacts.append(artifact_entry(project_root / "metadata" / "metadata.ini", "rom_metadata"))
+    artifacts.extend(build_scene_artifacts(project_root, scenes))
+    artifacts.extend(build_node_graph_source_artifacts(project_root, assets))
+    for output in build_asset_output_plan(project_root, assets):
+        artifacts.append(artifact_entry(project_root / str(output["out_path"]), f"asset_{output['kind']}"))
+    return artifacts
+
+
+def build_plan_next_actions(result: dict[str, Any]) -> list[str]:
+    actions: list[str] = []
+    if has_errors(result.get("issues", [])):
+        actions.append("Fix build-plan errors before attempting a real ROM build.")
+    toolchain = result.get("toolchain", {})
+    if isinstance(toolchain, dict) and not toolchain.get("build_ready"):
+        actions.append("Configure N64_INST/pathN64Inst and libdragon tools before invoking the real build.")
+    if not actions:
+        actions.append("Dry-run plan is clean; the next CLI slice can safely add an explicit execute mode.")
+    return actions
+
+
+def build_build_plan(project_arg: str | None, strict_toolchain: bool = False) -> dict[str, Any]:
+    limits = load_limits()
+    project_root, config_path, config, issues = resolve_project(project_arg)
+    if project_root is None or config_path is None or config is None:
+        result = {
+            "ok": False,
+            "command": "build",
+            "kind": "build_plan",
+            "mode": "dry_run",
+            "project": project_arg,
+            "issues": issues,
+            "next_actions": ["Pass --project <project-dir> or --project <path/to/project.p64proj>."],
+            "artifacts": [],
+        }
+        return result
+
+    project = project_summary(project_root, config_path, config)
+    validation = validate_project_file(config_path, limits)
+    inventory = scan_project_assets(project_root, include_entries=True)
+    assets = inventory.pop("assets", [])
+    validate_args = argparse.Namespace(texture_format=None, scene_pipeline=None, role="unknown")
+    asset_results = [validate_project_asset_entry(entry, limits, validate_args) for entry in assets]
+    asset_summary = summarize_asset_validation(asset_results)
+    asset_issues = flatten_asset_issues(asset_results, project_root)
+    scenes, scene_scan_issues = iter_scene_files(project_root)
+    toolchain = build_toolchain_status(config, strict_toolchain)
+
+    all_issues = list(issues)
+    all_issues.extend(validation.get("issues", []))
+    all_issues.extend(asset_issues)
+    all_issues.extend(scene_scan_issues)
+    all_issues.extend(toolchain.get("issues", []))
+
+    if " " in str(project_root.resolve()):
+        all_issues.append(
+            issue(
+                "error",
+                "BUILD_PATH",
+                f"Project path contains spaces: {project_root}.",
+                "Move the project to a path without spaces before building; the Pyrite64 launcher rejects these paths for Makefile/toolchain compatibility.",
+                "docs/docs/agent/ARCHITECTURE.md#launcher",
+            )
+        )
+
+    rom_name = str(config.get("romName") or "pyrite64")
+    asset_outputs = build_asset_output_plan(project_root, assets)
+    artifacts = build_expected_artifacts(project_root, config, scenes, assets)
+    result = {
+        "ok": not has_errors(all_issues),
+        "command": "build",
+        "kind": "build_plan",
+        "mode": "dry_run",
+        "dry_run": True,
+        "project": project,
+        "toolchain": toolchain,
+        "validation": {
+            "project": {
+                "ok": validation.get("ok", False),
+                "scene_count": validation.get("scene_count", 0),
+                "issue_count": len(validation.get("issues", [])),
+            },
+            "assets": asset_summary,
+        },
+        "plan": {
+            "rom": {
+                "name": rom_name,
+                "path": str(project_root / f"{rom_name}.z64"),
+                "exists": (project_root / f"{rom_name}.z64").exists(),
+            },
+            "makefile": {
+                "path": str(project_root / "Makefile"),
+                "template": str(REPO_ROOT / "data" / "build" / "baseMakefile.mk"),
+                "custom": str(project_root / "Makefile.custom"),
+                "custom_exists": (project_root / "Makefile.custom").exists(),
+            },
+            "make_command": f'make -C "{project_root}" -j8',
+            "editor_cli_command": f'<pyrite64-binary> --cli --cmd build "{config_path}"',
+            "bootstrap": build_bootstrap_plan(project_root),
+            "scene_outputs": [artifact for artifact in build_scene_artifacts(project_root, scenes)],
+            "asset_outputs": asset_outputs,
+            "generated_sources": [
+                str(project_root / "src" / "p64" / name)
+                for name in ("assetTable.h", "sceneTable.h", "sceneTable.cpp", "scriptTable.cpp", "globalScriptTable.cpp")
+            ],
+            "dynamic_outputs": [
+                "filesystem/**/*.sdata files may be added by the tiny3d importer for animated models.",
+                "metadata/img_* and metadata/description*.txt are generated when ROM metadata references image/text fields.",
+            ],
+        },
+        "inventory": inventory,
+        "issues": all_issues,
+        "artifacts": artifacts,
+    }
+    result["next_actions"] = build_plan_next_actions(result)
+    return result
+
+
+def print_build_plan(result: dict[str, Any]) -> None:
+    output_result(result, False)
+    project = result.get("project")
+    if isinstance(project, dict):
+        print(f"Project: {project.get('name')} ({project.get('path')})")
+    plan = result.get("plan", {})
+    if isinstance(plan, dict):
+        rom = plan.get("rom", {})
+        if isinstance(rom, dict):
+            print(f"ROM: {rom.get('path')} exists={rom.get('exists')}")
+        print(f"Mode: {result.get('mode')}")
+        print(f"Would run: {plan.get('make_command')}")
+    validation = result.get("validation", {})
+    if isinstance(validation, dict):
+        project_validation = validation.get("project", {})
+        asset_validation = validation.get("assets", {})
+        print(
+            "Validation: scenes={scenes} asset_validated={validated} asset_skipped={skipped} asset_failed={failed}".format(
+                scenes=project_validation.get("scene_count") if isinstance(project_validation, dict) else "?",
+                validated=asset_validation.get("validated") if isinstance(asset_validation, dict) else "?",
+                skipped=asset_validation.get("skipped") if isinstance(asset_validation, dict) else "?",
+                failed=asset_validation.get("failed") if isinstance(asset_validation, dict) else "?",
+            )
+        )
+    toolchain = result.get("toolchain", {})
+    if isinstance(toolchain, dict):
+        print(f"Toolchain: build_ready={toolchain.get('build_ready')} N64_INST={toolchain.get('effective_N64_INST') or '(unset)'}")
+    if result.get("next_actions"):
+        print("Next actions:")
+        for action in result["next_actions"]:
+            print(f"- {action}")
+
+
+def cmd_build(args: argparse.Namespace) -> int:
+    result = build_build_plan(args.project, args.strict_toolchain)
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print_build_plan(result)
+    toolchain_issue = any(item.get("severity") == "error" and item.get("rule") == "BUILD_TOOLCHAIN" for item in result.get("issues", []))
+    exit_code = 2 if toolchain_issue else (1 if has_errors(result.get("issues", [])) else 0)
+    project_path = None
+    project = result.get("project")
+    if isinstance(project, dict) and project.get("config_path"):
+        project_path = Path(project["config_path"])
+    record_if_requested(args, result, exit_code, project_path)
+    return exit_code
+
+
 def resolve_project_asset(project_root: Path, asset_ref: str) -> tuple[Path | None, list[dict[str, str]]]:
     assets_root = project_root / "assets"
     raw = Path(asset_ref)
@@ -2293,6 +2625,14 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--scene-pipeline", help="default, hdr, bigtex, or 0/1/2")
     validate.add_argument("--role", choices=["sfx", "music", "voice", "unknown"], default="unknown", help="Audio role hint")
     validate.set_defaults(func=validate_asset)
+
+    build = sub.add_parser("build", help="Plan a BF64 ROM build without mutating the project")
+    build.add_argument("--project", default=".", help="Project directory or project.p64proj path")
+    build.add_argument("--strict-toolchain", action="store_true", help="Treat missing build toolchain pieces as errors")
+    build.add_argument("--json", action="store_true", help="Emit stable JSON")
+    build.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
+    build.add_argument("--history-path", help="Override operation history JSONL path for --record")
+    build.set_defaults(func=cmd_build)
 
     project = sub.add_parser("project", help="Read project-level BF64 status")
     project_sub = project.add_subparsers(dest="project_command", required=True)

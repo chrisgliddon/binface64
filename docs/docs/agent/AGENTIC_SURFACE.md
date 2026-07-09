@@ -55,6 +55,8 @@ Inspect projects and scenes:
 ./bf64 doctor --json
 ./bf64 doctor --strict --json
 ./bf64 project status --project n64/examples/empty --json
+./bf64 build --project n64/examples/empty --json
+./bf64 build --project n64/examples/empty --strict-toolchain --json
 ./bf64 asset ls --project n64/examples/empty --json
 ./bf64 asset show assets/crate32.png --project n64/examples/empty --json
 ./bf64 asset validate-all --project n64/examples/empty --json
@@ -67,6 +69,7 @@ Record an operation and inspect history:
 
 ```bash
 ./bf64 project status --project n64/examples/empty --record --json
+./bf64 build --project n64/examples/empty --record --json
 ./bf64 asset validate-all --project n64/examples/empty --record --json
 ./bf64 validate n64/examples/jam25/assets/PlayerJump00.wav --role sfx --record --json
 ./bf64 history list --json
@@ -104,7 +107,7 @@ Exit codes:
 |---|---|
 | 0 | Success. No validation errors. |
 | 1 | User or asset error. Output includes actionable issues. |
-| 2 | Environment/toolchain error. Currently used by `doctor --strict`; future `build` / `run` should use it too. |
+| 2 | Environment/toolchain error. Currently used by `doctor --strict` and `build --strict-toolchain`; future executable `build` / `run` should use it too. |
 | 3 | Internal tooling error. |
 | 130 | Interrupted. |
 
@@ -122,7 +125,7 @@ Current records use `schema_version: 2` and include:
 - BF64 CLI version and git revision
 - path and project path when known
 - issue count, issue summary, and full issues
-- artifact paths when a future command emits build/import artifacts
+- artifact paths when a command emits or plans build/import artifacts
 
 ---
 
@@ -146,11 +149,13 @@ Scene checks include `conf` / `graph` structure, object count budget, duplicate 
 
 `asset validate-all` validates every supported project asset kind and explicitly skips unsupported read-only kinds such as `.blend` source files, prefabs, and node graphs. It is the current bulk preflight command before a real build exists.
 
+`build` is currently a dry-run planner. It resolves project config, project/scene validation, bulk asset validation, build toolchain readiness, expected ROM path, generated Makefile/source/binary paths, asset outputs, and history artifact records. By default, missing N64 toolchain pieces are warnings so project validation remains usable on machines without the SDK. Use `--strict-toolchain` to promote them to exit code 2.
+
 Known limits:
 
 - This is preflight validation. The tiny3d importer, mksprite, audioconv64, and a real ROM build remain the source of truth for deep pipeline assertions.
 - The model validator cannot prove the optimized retained-animation keyframe delta stays below 32768 ticks without running the tiny3d importer.
-- The validator does not yet import assets, mutate scenes, validate prefab/node-graph internals, build ROMs, or launch emulators.
+- The validator does not yet import assets, mutate scenes, validate prefab/node-graph internals, execute ROM builds, or launch emulators.
 - `doctor` distinguishes default warnings from `--strict` environment errors. Missing N64 toolchain pieces do not block asset/scene validation.
 
 ---
@@ -167,8 +172,8 @@ Known limits:
 
 ## Expansion Backlog
 
-- Add `new`, `build`, `run`, and `import`.
+- Add executable `build`, then `run`, `new`, and `import`.
 - Wrap `tools/bf64.py` from the Phase 6 MCP server instead of duplicating validation logic.
 - Expand structured scene/project schemas and preserve JSON compatibility with tests.
-- Add automatic artifact path capture for future build/import commands.
+- Add automatic artifact path capture for future executable build/import commands.
 - Decide whether duplicate scene UUID repair should be an explicit CLI command or only an editor action.
