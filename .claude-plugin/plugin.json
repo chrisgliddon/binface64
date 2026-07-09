@@ -1,0 +1,6 @@
+{
+  "name": "binface64-skills",
+  "version": "0.1.0",
+  "description": "AI agent skills for BF64/Binface64 N64 game development across code, assets, audio, UI, and QA.",
+  "skills": "./skills"
+}
