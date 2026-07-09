@@ -48,6 +48,34 @@ class Bf64CliTests(unittest.TestCase):
         scene = {"conf": {"name": "Scene", "renderPipeline": 0}, "graph": {"children": []}}
         (project / "data" / "scenes" / "1" / "scene.json").write_text(json.dumps(scene), encoding="utf-8")
 
+    def write_fake_sdk(self, sdk: Path) -> None:
+        for rel in (
+            "include/n64.mk",
+            "include/t3d.mk",
+            "bin/mkasset",
+            "bin/mksprite",
+            "bin/audioconv64",
+            "bin/mkfont",
+            "bin/mkdfs",
+            "bin/n64tool",
+        ):
+            path = sdk / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+
+    def write_fake_pyrite64(self, binary: Path, log_path: Path, returncode: int = 0) -> None:
+        binary.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json\n"
+            "import sys\n"
+            "from pathlib import Path\n"
+            f"Path({json.dumps(str(log_path))}).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n"
+            "print('fake build ok')\n"
+            f"raise SystemExit({returncode})\n",
+            encoding="utf-8",
+        )
+        binary.chmod(0o755)
+
     def test_constraints_list_json(self) -> None:
         proc, data = self.run_json("constraints", "list", "--json")
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -124,6 +152,60 @@ class Bf64CliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         self.assertFalse(data["ok"])
         self.assertTrue(any(item["rule"] == "BUILD_TOOLCHAIN" for item in data["issues"]))
+
+    def test_build_execute_uses_pyrite64_cli_after_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "game"
+            sdk = root / "sdk"
+            binary = root / "pyrite64"
+            log_path = root / "argv.json"
+            self.write_fake_sdk(sdk)
+            self.write_minimal_project(project, {"pathN64Inst": str(sdk)})
+            self.write_fake_pyrite64(binary, log_path)
+
+            proc, data = self.run_json(
+                "build",
+                "--execute",
+                "--project",
+                str(project),
+                "--pyrite64-binary",
+                str(binary),
+                "--json",
+            )
+            argv = json.loads(log_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["mode"], "execute")
+        self.assertFalse(data["dry_run"])
+        self.assertTrue(data["execute"]["executed"])
+        self.assertEqual(data["execute"]["returncode"], 0)
+        self.assertIn("fake build ok", data["execute"]["stdout_tail"])
+        self.assertEqual(argv[:3], ["--cli", "--cmd", "build"])
+        self.assertEqual(Path(argv[3]).name, "project.p64proj")
+
+    def test_build_execute_missing_binary_uses_exit_code_2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "game"
+            sdk = root / "sdk"
+            self.write_fake_sdk(sdk)
+            self.write_minimal_project(project, {"pathN64Inst": str(sdk)})
+            proc, data = self.run_json(
+                "build",
+                "--execute",
+                "--project",
+                str(project),
+                "--pyrite64-binary",
+                str(root / "missing-pyrite64"),
+                "--json",
+            )
+
+        self.assertEqual(proc.returncode, 2)
+        self.assertFalse(data["ok"])
+        self.assertFalse(data["execute"]["executed"])
+        self.assertTrue(any(item["rule"] == "BUILD_BINARY" for item in data["issues"]))
 
     def test_scene_ls_empty_project(self) -> None:
         proc, data = self.run_json("scene", "ls", "--project", "n64/examples/empty", "--json")

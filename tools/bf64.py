@@ -27,10 +27,11 @@ LIMITS_PATH = REPO_ROOT / "docs" / "docs" / "n64" / "limits.json"
 DEFAULT_HISTORY_PATH = REPO_ROOT / ".bf64" / "operations.jsonl"
 PROJECT_FILENAME = "project.p64proj"
 MAX_COMPONENT_ID = 12
-CLI_VERSION = "0.5.0"
+CLI_VERSION = "0.6.0"
 HISTORY_SCHEMA_VERSION = 2
 VALIDATABLE_ASSET_KINDS = {"texture", "model", "audio", "font"}
 PROJECT_ASSET_KINDS = ("texture", "model", "audio", "font", "prefab", "node_graph", "unknown")
+PYRITE_BINARY_NAMES = ("pyrite64", "pyrite64.exe")
 BUILD_TOOLCHAIN_FILES = (
     ("n64.mk", "include/n64.mk"),
     ("t3d.mk", "include/t3d.mk"),
@@ -1655,6 +1656,20 @@ def build_plan_next_actions(result: dict[str, Any]) -> list[str]:
     return actions
 
 
+def build_execute_next_actions(result: dict[str, Any]) -> list[str]:
+    actions: list[str] = []
+    execute = result.get("execute", {})
+    if isinstance(execute, dict) and not execute.get("executed"):
+        actions.append("Fix preflight or binary resolution errors before executing the build.")
+    elif result.get("ok"):
+        rom = (result.get("plan") or {}).get("rom", {}) if isinstance(result.get("plan"), dict) else {}
+        rom_path = rom.get("path") if isinstance(rom, dict) else ""
+        actions.append(f"Build completed; the next CLI slice can launch the ROM at {rom_path}.")
+    else:
+        actions.append("Inspect the captured Pyrite64 build output and fix the reported build failure.")
+    return actions
+
+
 def build_build_plan(project_arg: str | None, strict_toolchain: bool = False) -> dict[str, Any]:
     limits = load_limits()
     project_root, config_path, config, issues = resolve_project(project_arg)
@@ -1752,6 +1767,199 @@ def build_build_plan(project_arg: str | None, strict_toolchain: bool = False) ->
     return result
 
 
+def tail_text(text: str, max_lines: int = 200, max_chars: int = 20000) -> str:
+    if not text:
+        return ""
+    lines = text.splitlines()
+    if len(lines) > max_lines:
+        text = "\n".join(lines[-max_lines:])
+    if len(text) > max_chars:
+        text = text[-max_chars:]
+    return text
+
+
+def pyrite_binary_candidates(explicit_binary: str | None = None) -> list[Path]:
+    candidates: list[Path] = []
+    if explicit_binary:
+        raw = Path(explicit_binary).expanduser()
+        candidates.append(raw if raw.is_absolute() else Path.cwd() / raw)
+    else:
+        for name in PYRITE_BINARY_NAMES:
+            candidates.append(REPO_ROOT / name)
+            candidates.append(REPO_ROOT / "build" / name)
+        for name in PYRITE_BINARY_NAMES:
+            found = shutil.which(name)
+            if found:
+                candidates.append(Path(found))
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        try:
+            key = str(candidate.resolve())
+        except OSError:
+            pass
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+    return deduped
+
+
+def resolve_pyrite_binary(explicit_binary: str | None = None) -> tuple[Path | None, list[Path], list[dict[str, str]]]:
+    candidates = pyrite_binary_candidates(explicit_binary)
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate, candidates, []
+
+    if explicit_binary:
+        message = f"Pyrite64 binary is not executable or does not exist: {explicit_binary}."
+    else:
+        message = "Could not find an executable Pyrite64 binary."
+    return (
+        None,
+        candidates,
+        [
+            issue(
+                "error",
+                "BUILD_BINARY",
+                message,
+                "Build the editor with CMake or pass --pyrite64-binary <path/to/pyrite64>.",
+                "docs/docs/dev/build.rst",
+            )
+        ],
+    )
+
+
+def refresh_artifact_entries(artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    refreshed: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        entry = dict(artifact)
+        path = Path(str(entry.get("path", "")))
+        entry["exists"] = path.exists()
+        entry.pop("size_bytes", None)
+        if path.exists() and path.is_file():
+            try:
+                entry["size_bytes"] = path.stat().st_size
+            except OSError:
+                pass
+        refreshed.append(entry)
+    return refreshed
+
+
+def build_command_exit_code(result: dict[str, Any]) -> int:
+    env_rules = {"BUILD_TOOLCHAIN", "BUILD_BINARY"}
+    if any(item.get("severity") == "error" and item.get("rule") in env_rules for item in result.get("issues", [])):
+        return 2
+    return 1 if has_errors(result.get("issues", [])) else 0
+
+
+def execute_build(args: argparse.Namespace) -> dict[str, Any]:
+    result = build_build_plan(args.project, True)
+    result["mode"] = "execute"
+    result["dry_run"] = False
+    result["execute"] = {
+        "requested": True,
+        "executed": False,
+        "binary": None,
+        "candidates": [],
+        "argv": [],
+        "returncode": None,
+        "duration_ms": None,
+    }
+
+    if has_errors(result.get("issues", [])):
+        result["execute"]["skipped_reason"] = "preflight_failed"
+        result["next_actions"] = build_execute_next_actions(result)
+        return result
+
+    binary, candidates, binary_issues = resolve_pyrite_binary(args.pyrite64_binary)
+    result["execute"]["candidates"] = [str(candidate) for candidate in candidates]
+    if binary_issues:
+        result["issues"].extend(binary_issues)
+        result["ok"] = False
+        result["execute"]["skipped_reason"] = "binary_not_found"
+        result["next_actions"] = build_execute_next_actions(result)
+        return result
+
+    project = result.get("project", {})
+    config_path = Path(str(project.get("config_path"))) if isinstance(project, dict) else None
+    if config_path is None:
+        result["issues"].append(issue("error", "PROJECT", "Build plan is missing project config_path."))
+        result["ok"] = False
+        result["execute"]["skipped_reason"] = "missing_project_config"
+        result["next_actions"] = build_execute_next_actions(result)
+        return result
+
+    argv = [str(binary), "--cli", "--cmd", "build", str(config_path)]
+    result["execute"]["binary"] = str(binary)
+    result["execute"]["argv"] = argv
+    started_at = time.perf_counter()
+    try:
+        proc = subprocess.run(
+            argv,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=args.timeout if args.timeout and args.timeout > 0 else None,
+        )
+        result["execute"]["executed"] = True
+        result["execute"]["returncode"] = proc.returncode
+        result["execute"]["duration_ms"] = int((time.perf_counter() - started_at) * 1000)
+        result["execute"]["stdout_tail"] = tail_text(proc.stdout)
+        result["execute"]["stderr_tail"] = tail_text(proc.stderr)
+        result["artifacts"] = refresh_artifact_entries(result.get("artifacts", []))
+        rom = (result.get("plan") or {}).get("rom", {}) if isinstance(result.get("plan"), dict) else {}
+        if isinstance(rom, dict) and rom.get("path"):
+            rom_path = Path(str(rom["path"]))
+            rom["exists"] = rom_path.exists()
+            if rom_path.exists() and rom_path.is_file():
+                try:
+                    rom["size_bytes"] = rom_path.stat().st_size
+                except OSError:
+                    pass
+        if proc.returncode != 0:
+            result["issues"].append(
+                issue(
+                    "error",
+                    "BUILD_EXECUTE",
+                    f"Pyrite64 CLI build failed with exit code {proc.returncode}.",
+                    "Inspect execute.stdout_tail and execute.stderr_tail for the underlying compiler/toolchain error.",
+                )
+            )
+        result["ok"] = not has_errors(result.get("issues", []))
+    except subprocess.TimeoutExpired as exc:
+        result["execute"]["executed"] = True
+        result["execute"]["returncode"] = None
+        result["execute"]["duration_ms"] = int((time.perf_counter() - started_at) * 1000)
+        result["execute"]["stdout_tail"] = tail_text(exc.stdout or "")
+        result["execute"]["stderr_tail"] = tail_text(exc.stderr or "")
+        result["issues"].append(
+            issue(
+                "error",
+                "BUILD_TIMEOUT",
+                f"Pyrite64 CLI build timed out after {args.timeout} seconds.",
+                "Increase --timeout or inspect whether the build is waiting on an external tool.",
+            )
+        )
+        result["ok"] = False
+    except OSError as exc:
+        result["issues"].append(
+            issue(
+                "error",
+                "BUILD_BINARY",
+                f"Could not execute Pyrite64 binary: {exc}",
+                "Build the editor with CMake or pass --pyrite64-binary <path/to/pyrite64>.",
+            )
+        )
+        result["ok"] = False
+
+    result["next_actions"] = build_execute_next_actions(result)
+    return result
+
+
 def print_build_plan(result: dict[str, Any]) -> None:
     output_result(result, False)
     project = result.get("project")
@@ -1779,6 +1987,9 @@ def print_build_plan(result: dict[str, Any]) -> None:
     toolchain = result.get("toolchain", {})
     if isinstance(toolchain, dict):
         print(f"Toolchain: build_ready={toolchain.get('build_ready')} N64_INST={toolchain.get('effective_N64_INST') or '(unset)'}")
+    execute = result.get("execute", {})
+    if isinstance(execute, dict) and execute.get("requested"):
+        print(f"Execute: executed={execute.get('executed')} returncode={execute.get('returncode')} binary={execute.get('binary')}")
     if result.get("next_actions"):
         print("Next actions:")
         for action in result["next_actions"]:
@@ -1786,13 +1997,12 @@ def print_build_plan(result: dict[str, Any]) -> None:
 
 
 def cmd_build(args: argparse.Namespace) -> int:
-    result = build_build_plan(args.project, args.strict_toolchain)
+    result = execute_build(args) if args.execute else build_build_plan(args.project, args.strict_toolchain)
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         print_build_plan(result)
-    toolchain_issue = any(item.get("severity") == "error" and item.get("rule") == "BUILD_TOOLCHAIN" for item in result.get("issues", []))
-    exit_code = 2 if toolchain_issue else (1 if has_errors(result.get("issues", [])) else 0)
+    exit_code = build_command_exit_code(result)
     project_path = None
     project = result.get("project")
     if isinstance(project, dict) and project.get("config_path"):
@@ -2626,8 +2836,11 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--role", choices=["sfx", "music", "voice", "unknown"], default="unknown", help="Audio role hint")
     validate.set_defaults(func=validate_asset)
 
-    build = sub.add_parser("build", help="Plan a BF64 ROM build without mutating the project")
+    build = sub.add_parser("build", help="Plan or execute a BF64 ROM build")
     build.add_argument("--project", default=".", help="Project directory or project.p64proj path")
+    build.add_argument("--execute", action="store_true", help="Run the existing Pyrite64 CLI build after strict preflight")
+    build.add_argument("--pyrite64-binary", help="Path to the Pyrite64 editor binary used by --execute")
+    build.add_argument("--timeout", type=int, default=0, help="Optional --execute timeout in seconds; 0 means no timeout")
     build.add_argument("--strict-toolchain", action="store_true", help="Treat missing build toolchain pieces as errors")
     build.add_argument("--json", action="store_true", help="Emit stable JSON")
     build.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
