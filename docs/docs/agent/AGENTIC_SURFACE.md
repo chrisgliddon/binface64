@@ -14,7 +14,7 @@ This page records the first machine-facing BF64 surface: structured N64 constrai
 |---|---|
 | `bf64` | Stable repository-local launcher for the BF64 CLI. |
 | `docs/docs/n64/limits.json` | Machine-readable version of the most important N64/BF64 limits. This is the source for validators and future MCP constraint tools. |
-| `tools/bf64.py` | No-dependency seed CLI for constraint lookup, project/scene/asset inspection, asset preflight validation, and operation history. |
+| `tools/bf64.py` | No-dependency seed CLI for project creation, constraint lookup, project/scene/asset inspection, asset preflight validation, and operation history. |
 | `.bf64/operations.jsonl` | Local, ignored audit log written by commands that support `--record`. |
 | `tests/test_bf64_cli.py` | Fixture tests for the JSON contract and core validator behavior. |
 | `.github/workflows/bf64-cli.yml` | CI job for JSON validity, CLI compilation, and unit tests. |
@@ -52,6 +52,7 @@ Validate one asset:
 Inspect projects and scenes:
 
 ```bash
+./bf64 new ./projects/agent_game --name "Agent Game" --json
 ./bf64 doctor --json
 ./bf64 doctor --strict --json
 ./bf64 project status --project n64/examples/empty --json
@@ -71,6 +72,7 @@ Inspect projects and scenes:
 Record an operation and inspect history:
 
 ```bash
+./bf64 new ./projects/agent_game --name "Agent Game" --record --json
 ./bf64 project status --project n64/examples/empty --record --json
 ./bf64 build --project n64/examples/empty --record --json
 ./bf64 build --execute --project n64/examples/empty --record --json
@@ -111,7 +113,7 @@ Exit codes:
 | Code | Meaning |
 |---|---|
 | 0 | Success. No validation errors. |
-| 1 | User or asset error. Output includes actionable issues. |
+| 1 | User, project, or asset error. Output includes actionable issues. |
 | 2 | Environment/toolchain error. Currently used by `doctor --strict`, `build --strict-toolchain`, `build --execute` preflight/binary resolution, and missing `run` emulator commands. |
 | 3 | Internal tooling error. |
 | 130 | Interrupted. |
@@ -130,7 +132,7 @@ Current records use `schema_version: 2` and include:
 - BF64 CLI version and git revision
 - path and project path when known
 - issue count, issue summary, and full issues
-- artifact paths when a command emits or plans build/import artifacts
+- artifact paths when a command emits scaffold, build, run, or future import artifacts
 
 ---
 
@@ -145,6 +147,8 @@ Audio checks include BF64 editor-supported extensions, `wavCompression`, `wavRes
 Project checks include parseability, `sceneIdOnBoot` / `sceneIdOnReset` / `sceneIdLastOpened` references, and per-scene validation.
 
 Scene checks include `conf` / `graph` structure, object count budget, duplicate object UUIDs, component id range, render pipeline framebuffer constraints, BigTex `doClearColor: false`, and unusual audio frequencies.
+
+`new` creates an editor-compatible starter project from `n64/examples/empty`, patches `project.p64proj`, refuses non-empty targets unless `--force` is passed, rejects project paths with spaces to match the headed editor/build launcher, ensures bootstrap files such as `assets/p64/font.ia4.png`, validates the generated project, and records scaffold artifacts in history.
 
 `project status` combines project config, full scene validation, asset inventory counts, `doctor` toolchain checks, and suggested next actions. It is the first command agents should call when entering an unknown BF64 project.
 
@@ -181,7 +185,7 @@ Known limits:
 
 ## Expansion Backlog
 
-- Add `new`, then `import`.
+- Add `import`.
 - Wrap `tools/bf64.py` from the Phase 6 MCP server instead of duplicating validation logic.
 - Expand structured scene/project schemas and preserve JSON compatibility with tests.
 - Extend artifact capture for future import commands.

@@ -101,6 +101,112 @@ class Bf64CliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertRegex(proc.stdout.strip(), r"^bf64 \d+\.\d+\.\d+$")
 
+    def test_new_creates_editor_compatible_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "agent_game"
+            proc, data = self.run_json("new", str(target), "--name", "Agent Game", "--json")
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(data["ok"])
+            self.assertEqual(data["command"], "new")
+            self.assertEqual(data["project"]["name"], "Agent Game")
+            self.assertEqual(data["project"]["romName"], "agent_game")
+            self.assertEqual(data["validation"]["scene_count"], 1)
+            self.assertTrue((target / "project.p64proj").exists())
+            self.assertTrue((target / "data" / "scenes" / "1" / "scene.json").exists())
+            self.assertTrue((target / "assets" / "box.glb").exists())
+            self.assertTrue((target / "assets" / "p64" / "font.ia4.png").exists())
+            config = json.loads((target / "project.p64proj").read_text(encoding="utf-8"))
+            self.assertEqual(config["name"], "Agent Game")
+            self.assertEqual(config["romName"], "agent_game")
+            self.assertEqual(config["pathEmu"], "ares")
+
+            validate_proc, validate_data = self.run_json("validate", str(target / "project.p64proj"), "--json")
+            self.assertEqual(validate_proc.returncode, 0, validate_proc.stderr)
+            self.assertTrue(validate_data["ok"])
+
+    def test_new_refuses_non_empty_directory_without_force(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "existing_game"
+            target.mkdir()
+            (target / "README.md").write_text("keep me\n", encoding="utf-8")
+
+            proc, data = self.run_json("new", str(target), "--json")
+
+            self.assertEqual(proc.returncode, 1)
+            self.assertFalse(data["ok"])
+            self.assertTrue(any(item["rule"] == "NEW_EXISTS" for item in data["issues"]))
+            self.assertFalse((target / "project.p64proj").exists())
+            self.assertEqual((target / "README.md").read_text(encoding="utf-8"), "keep me\n")
+
+    def test_new_force_overwrites_scaffold_files_and_keeps_extra_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "existing_game"
+            target.mkdir()
+            (target / "README.md").write_text("keep me\n", encoding="utf-8")
+            (target / "project.p64proj").write_text("{}", encoding="utf-8")
+
+            proc, data = self.run_json(
+                "new",
+                str(target),
+                "--force",
+                "--name",
+                "Forced Game",
+                "--rom-name",
+                "Forced Game",
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(data["ok"])
+            self.assertEqual((target / "README.md").read_text(encoding="utf-8"), "keep me\n")
+            config = json.loads((target / "project.p64proj").read_text(encoding="utf-8"))
+            self.assertEqual(config["name"], "Forced Game")
+            self.assertEqual(config["romName"], "Forced_Game")
+            self.assertTrue(any(item["action"] == "overwritten" for item in data["changes"]))
+
+    def test_new_rejects_project_paths_with_spaces(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "bad path"
+            proc, data = self.run_json("new", str(target), "--json")
+
+            self.assertEqual(proc.returncode, 1)
+            self.assertFalse(data["ok"])
+            self.assertTrue(any(item["rule"] == "NEW_PATH" for item in data["issues"]))
+            self.assertFalse(target.exists())
+
+    def test_new_rejects_template_subdirectories(self) -> None:
+        target = ROOT / "n64" / "examples" / "empty" / "generated_game"
+        proc, data = self.run_json("new", str(target), "--json")
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertFalse(data["ok"])
+        self.assertTrue(any(item["rule"] == "NEW_PATH" for item in data["issues"]))
+        self.assertFalse(target.exists())
+
+    def test_new_records_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "record_game"
+            history = Path(tmp) / "history.jsonl"
+            proc, data = self.run_json(
+                "new",
+                str(target),
+                "--record",
+                "--history-path",
+                str(history),
+                "--json",
+            )
+            rows = [json.loads(line) for line in history.read_text(encoding="utf-8").splitlines()]
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertEqual(len(rows), 1)
+        record = rows[0]
+        self.assertEqual(record["command"], "new")
+        self.assertEqual(record["path"], str(target / "project.p64proj"))
+        self.assertEqual(record["project_path"], str(target))
+        self.assertTrue(any(item["kind"] == "project_scaffold_file" for item in record["artifacts"]))
+
     def test_project_status_empty_project(self) -> None:
         proc, data = self.run_json("project", "status", "--project", "n64/examples/empty", "--json")
         self.assertEqual(proc.returncode, 0, proc.stderr)

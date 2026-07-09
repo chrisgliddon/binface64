@@ -27,8 +27,9 @@ REPO_ROOT = SCRIPT_PATH.parent.parent
 LIMITS_PATH = REPO_ROOT / "docs" / "docs" / "n64" / "limits.json"
 DEFAULT_HISTORY_PATH = REPO_ROOT / ".bf64" / "operations.jsonl"
 PROJECT_FILENAME = "project.p64proj"
+EMPTY_PROJECT_TEMPLATE = REPO_ROOT / "n64" / "examples" / "empty"
 MAX_COMPONENT_ID = 12
-CLI_VERSION = "0.7.0"
+CLI_VERSION = "0.8.0"
 HISTORY_SCHEMA_VERSION = 2
 VALIDATABLE_ASSET_KINDS = {"texture", "model", "audio", "font"}
 PROJECT_ASSET_KINDS = ("texture", "model", "audio", "font", "prefab", "node_graph", "unknown")
@@ -1473,6 +1474,416 @@ def cmd_project_status(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         print_project_status(result)
+    project_path = None
+    project = result.get("project")
+    if isinstance(project, dict) and project.get("config_path"):
+        project_path = Path(project["config_path"])
+    record_if_requested(args, result, exit_code, project_path)
+    return exit_code
+
+
+def make_name_safe(name: str) -> str:
+    safe_name = ""
+    for char in name:
+        if char.isascii() and (char.isalnum() or char in {"_", "-"}):
+            safe_name += char
+        elif char == " ":
+            safe_name += "_"
+    return safe_name
+
+
+def default_project_name(project_root: Path) -> str:
+    raw = project_root.name.replace("_", " ").replace("-", " ").strip()
+    if not raw:
+        return "New Project"
+    return " ".join(part[:1].upper() + part[1:] for part in raw.split())
+
+
+def default_rom_name(project_root: Path) -> str:
+    safe = make_name_safe(project_root.name)
+    return safe or "p64_project"
+
+
+def new_project_config(name: str, rom_name: str, emulator: str, n64_inst: str) -> dict[str, Any]:
+    return {
+        "name": name,
+        "pathEmu": emulator,
+        "pathN64Inst": n64_inst,
+        "romName": rom_name,
+        "sceneIdLastOpened": 1,
+        "sceneIdOnBoot": 1,
+        "sceneIdOnReset": 1,
+    }
+
+
+def write_json_file(path: Path, data: dict[str, Any]) -> None:
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def directory_has_entries(path: Path) -> bool:
+    try:
+        next(path.iterdir())
+        return True
+    except StopIteration:
+        return False
+
+
+def add_change(
+    changes: list[dict[str, str]],
+    *,
+    action: str,
+    kind: str,
+    path: Path,
+    source: Path | None = None,
+) -> None:
+    entry = {"action": action, "kind": kind, "path": str(path)}
+    if source:
+        entry["source"] = str(source)
+    changes.append(entry)
+
+
+def copy_template_project(
+    source_root: Path,
+    project_root: Path,
+    *,
+    force: bool,
+    changes: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    for source in sorted(source_root.rglob("*"), key=lambda item: str(item.relative_to(source_root))):
+        relative = source.relative_to(source_root)
+        dest = project_root / relative
+        if source.is_dir():
+            if dest.exists() and not dest.is_dir():
+                issues.append(
+                    issue(
+                        "error",
+                        "NEW_CONFLICT",
+                        f"Cannot create directory because a file already exists: {dest}.",
+                        "Remove the conflicting path or choose another project directory.",
+                    )
+                )
+                continue
+            existed = dest.exists()
+            dest.mkdir(parents=True, exist_ok=True)
+            add_change(changes, action="skipped" if existed else "created", kind="directory", path=dest, source=source)
+            continue
+
+        if dest.exists() and dest.is_dir():
+            issues.append(
+                issue(
+                    "error",
+                    "NEW_CONFLICT",
+                    f"Cannot write template file because a directory already exists: {dest}.",
+                    "Remove the conflicting path or choose another project directory.",
+                )
+            )
+            continue
+        if dest.exists() and not force:
+            issues.append(
+                issue(
+                    "error",
+                    "NEW_EXISTS",
+                    f"Refusing to overwrite existing file: {dest}.",
+                    "Use an empty target directory or pass --force.",
+                )
+            )
+            continue
+
+        existed = dest.exists()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, dest)
+        add_change(changes, action="overwritten" if existed else "created", kind="file", path=dest, source=source)
+    return issues
+
+
+def remove_known_generated_outputs(project_root: Path, rom_name: str, changes: list[dict[str, str]]) -> None:
+    cleanup_paths = [
+        project_root / "Makefile",
+        project_root / "build",
+        project_root / "filesystem",
+        project_root / "p64_project.z64",
+        project_root / f"{rom_name}.z64",
+    ]
+    seen: set[Path] = set()
+    for path in cleanup_paths:
+        if path in seen or not path.exists():
+            continue
+        seen.add(path)
+        kind = "directory" if path.is_dir() else "file"
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+        add_change(changes, action="removed", kind=kind, path=path)
+
+
+def ensure_bootstrap_files(project_root: Path, force: bool, changes: list[dict[str, str]]) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    bootstrap_dirs = [
+        project_root / "data",
+        project_root / "data" / "scenes",
+        project_root / "assets",
+        project_root / "assets" / "p64",
+        project_root / "src",
+        project_root / "src" / "p64",
+        project_root / "src" / "user",
+    ]
+    for directory in bootstrap_dirs:
+        existed = directory.exists()
+        if existed and not directory.is_dir():
+            issues.append(
+                issue(
+                    "error",
+                    "NEW_CONFLICT",
+                    f"Cannot create directory because a file already exists: {directory}.",
+                    "Remove the conflicting path or choose another project directory.",
+                )
+            )
+            continue
+        directory.mkdir(parents=True, exist_ok=True)
+        add_change(changes, action="skipped" if existed else "created", kind="directory", path=directory)
+
+    bootstrap_files = [
+        (REPO_ROOT / "data" / "build" / "baseGitignore", project_root / ".gitignore"),
+        (REPO_ROOT / "data" / "build" / "baseMakefile.custom", project_root / "Makefile.custom"),
+        (REPO_ROOT / "data" / "build" / "assets" / "font.ia4.png", project_root / "assets" / "p64" / "font.ia4.png"),
+    ]
+    for source, dest in bootstrap_files:
+        if not source.exists():
+            issues.append(
+                issue(
+                    "error",
+                    "NEW_TEMPLATE",
+                    f"Missing bootstrap template file: {source}.",
+                    "Restore the repository data/build templates before creating projects.",
+                )
+            )
+            continue
+        if dest.exists() and dest.is_dir():
+            issues.append(
+                issue(
+                    "error",
+                    "NEW_CONFLICT",
+                    f"Cannot write bootstrap file because a directory already exists: {dest}.",
+                    "Remove the conflicting path or choose another project directory.",
+                )
+            )
+            continue
+        existed = dest.exists()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, dest)
+        add_change(changes, action="overwritten" if existed else "created", kind="file", path=dest, source=source)
+    return issues
+
+
+def new_project_next_actions(result: dict[str, Any]) -> list[str]:
+    if has_errors(result.get("issues", [])):
+        return ["Fix the reported scaffold issue, then rerun `bf64 new`."]
+    project = result.get("project", {})
+    project_path = str(project.get("path", result.get("path", ""))) if isinstance(project, dict) else str(result.get("path", ""))
+    quoted = shlex.quote(project_path)
+    return [
+        f"./bf64 project status --project {quoted} --json",
+        f"./bf64 build --project {quoted} --json",
+        f"./bf64 run --project {quoted} --json",
+    ]
+
+
+def new_project_artifacts(changes: list[dict[str, str]]) -> list[dict[str, Any]]:
+    artifacts: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for change in changes:
+        if change.get("action") == "removed":
+            continue
+        path = Path(change["path"])
+        kind = f"project_scaffold_{change.get('kind', 'path')}"
+        key = (kind, str(path))
+        if key in seen:
+            continue
+        seen.add(key)
+        artifacts.append(artifact_entry(path, kind))
+    return artifacts
+
+
+def build_new_project(args: argparse.Namespace) -> dict[str, Any]:
+    project_root = Path(args.path).expanduser()
+    config_path = project_root / PROJECT_FILENAME
+    name = args.name or default_project_name(project_root)
+    rom_name = make_name_safe(args.rom_name) if args.rom_name else default_rom_name(project_root)
+    emulator = args.emulator or "ares"
+    n64_inst = args.n64_inst or ""
+    issues: list[dict[str, str]] = []
+    changes: list[dict[str, str]] = []
+
+    if project_root.suffix == ".p64proj":
+        issues.append(
+            issue(
+                "error",
+                "NEW_PATH",
+                "`bf64 new` expects a project directory, not a project.p64proj file path.",
+                "Pass a directory path such as `./games/my_game`.",
+            )
+        )
+    if " " in str(project_root.resolve(strict=False)):
+        issues.append(
+            issue(
+                "error",
+                "NEW_PATH",
+                f"Project path contains spaces: {project_root}.",
+                "Choose a path without spaces; the editor and build launcher reject project paths with spaces.",
+                "docs/docs/agent/ARCHITECTURE.md#launcher",
+            )
+        )
+    if project_root.exists() and not project_root.is_dir():
+        issues.append(
+            issue(
+                "error",
+                "NEW_PATH",
+                f"Target exists and is not a directory: {project_root}.",
+                "Choose a new directory path.",
+            )
+        )
+    template_root = EMPTY_PROJECT_TEMPLATE.resolve(strict=False)
+    project_resolved = project_root.resolve(strict=False)
+    if project_resolved == template_root or project_resolved.is_relative_to(template_root):
+        issues.append(
+            issue(
+                "error",
+                "NEW_PATH",
+                f"Refusing to create a project inside the template directory: {EMPTY_PROJECT_TEMPLATE}.",
+                "Choose a target outside n64/examples/empty.",
+            )
+        )
+    if project_root.resolve(strict=False) == REPO_ROOT:
+        issues.append(
+            issue(
+                "error",
+                "NEW_PATH",
+                "Refusing to create a project at the repository root.",
+                "Choose an empty subdirectory or a separate projects directory.",
+            )
+        )
+    if not rom_name:
+        issues.append(
+            issue(
+                "error",
+                "NEW_ROM_NAME",
+                "ROM name does not contain any filesystem-safe characters.",
+                "Use letters, numbers, underscores, or hyphens.",
+            )
+        )
+    if not EMPTY_PROJECT_TEMPLATE.exists():
+        issues.append(
+            issue(
+                "error",
+                "NEW_TEMPLATE",
+                f"Missing project template: {EMPTY_PROJECT_TEMPLATE}.",
+                "Restore n64/examples/empty before creating projects.",
+            )
+        )
+    if project_root.exists() and project_root.is_dir() and directory_has_entries(project_root) and not args.force:
+        issues.append(
+            issue(
+                "error",
+                "NEW_EXISTS",
+                f"Target directory is not empty: {project_root}.",
+                "Choose an empty directory or pass --force to overwrite scaffold files.",
+            )
+        )
+
+    result: dict[str, Any] = {
+        "ok": False,
+        "command": "new",
+        "kind": "project_new",
+        "path": str(project_root),
+        "template": str(EMPTY_PROJECT_TEMPLATE),
+        "force": bool(args.force),
+        "project": {
+            "path": str(project_root),
+            "config_path": str(config_path),
+            "name": name,
+            "romName": rom_name,
+            "sceneIdOnBoot": 1,
+            "sceneIdOnReset": 1,
+            "sceneIdLastOpened": 1,
+        },
+        "changes": changes,
+        "artifacts": [],
+        "validation": None,
+        "issues": issues,
+        "next_actions": [],
+    }
+    if has_errors(issues):
+        result["next_actions"] = new_project_next_actions(result)
+        return result
+
+    try:
+        existed = project_root.exists()
+        project_root.mkdir(parents=True, exist_ok=True)
+        add_change(changes, action="skipped" if existed else "created", kind="directory", path=project_root)
+        issues.extend(copy_template_project(EMPTY_PROJECT_TEMPLATE, project_root, force=args.force, changes=changes))
+        remove_known_generated_outputs(project_root, rom_name, changes)
+        issues.extend(ensure_bootstrap_files(project_root, args.force, changes))
+
+        config = new_project_config(name, rom_name, emulator, n64_inst)
+        config_existed = config_path.exists()
+        write_json_file(config_path, config)
+        add_change(changes, action="overwritten" if config_existed else "created", kind="file", path=config_path)
+    except Exception as exc:  # noqa: BLE001
+        issues.append(
+            issue(
+                "error",
+                "NEW_IO",
+                f"Could not create project scaffold: {exc}",
+                "Check path permissions and available disk space, then rerun `bf64 new`.",
+            )
+        )
+
+    if not has_errors(issues):
+        validation = validate_project_file(config_path, load_limits())
+        result["validation"] = {
+            "ok": validation.get("ok", False),
+            "scene_count": validation.get("scene_count", 0),
+            "issue_count": len(validation.get("issues", [])),
+        }
+        issues.extend(validation.get("issues", []))
+
+    result["ok"] = not has_errors(issues)
+    result["issues"] = issues
+    result["artifacts"] = new_project_artifacts(changes)
+    result["next_actions"] = new_project_next_actions(result)
+    return result
+
+
+def print_new_result(result: dict[str, Any]) -> None:
+    output_result(result, False)
+    project = result.get("project")
+    if isinstance(project, dict):
+        print(f"Project: {project.get('name')} ({project.get('path')})")
+        print(f"ROM: {project.get('romName')}")
+    changes = result.get("changes", [])
+    if isinstance(changes, list):
+        created = sum(1 for item in changes if item.get("action") == "created")
+        overwritten = sum(1 for item in changes if item.get("action") == "overwritten")
+        removed = sum(1 for item in changes if item.get("action") == "removed")
+        print(f"Changes: created={created} overwritten={overwritten} removed={removed}")
+    if result.get("next_actions"):
+        print("Next actions:")
+        for action in result["next_actions"]:
+            print(f"- {action}")
+
+
+def cmd_new(args: argparse.Namespace) -> int:
+    result = build_new_project(args)
+    if any(item.get("rule") == "NEW_TEMPLATE" for item in result.get("issues", [])):
+        exit_code = 3
+    else:
+        exit_code = 1 if has_errors(result.get("issues", [])) else 0
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print_new_result(result)
     project_path = None
     project = result.get("project")
     if isinstance(project, dict) and project.get("config_path"):
@@ -3114,6 +3525,18 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
     run.add_argument("--history-path", help="Override operation history JSONL path for --record")
     run.set_defaults(func=cmd_run)
+
+    new = sub.add_parser("new", help="Create a new BF64 project from the editor-compatible starter template")
+    new.add_argument("path", help="Project directory to create; must not contain spaces")
+    new.add_argument("--name", help="Human-readable project name; defaults to the target directory name")
+    new.add_argument("--rom-name", help="ROM filename stem; defaults to a safe version of the target directory name")
+    new.add_argument("--emulator", default="ares", help="Project pathEmu value; defaults to ares")
+    new.add_argument("--n64-inst", default="", help="Project pathN64Inst value; defaults to empty and can use N64_INST at build time")
+    new.add_argument("--force", action="store_true", help="Overwrite scaffold files in an existing directory")
+    new.add_argument("--json", action="store_true", help="Emit stable JSON")
+    new.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
+    new.add_argument("--history-path", help="Override operation history JSONL path for --record")
+    new.set_defaults(func=cmd_new)
 
     project = sub.add_parser("project", help="Read project-level BF64 status")
     project_sub = project.add_subparsers(dest="project_command", required=True)

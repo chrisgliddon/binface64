@@ -2,8 +2,8 @@
 
 **Repo:** `https://github.com/chrisgliddon/binface64` (fork of `HailToDodongo/pyrite64`)
 **Current branch:** `main`
-**Last session:** ROM run command (2026-07-09)
-**Next session:** Phase 5 seed CLI — add `new`, then `import`
+**Last session:** Project generator command (2026-07-09)
+**Next session:** Phase 5 seed CLI — add `import`
 
 This is the **only** memory between sessions. Read it first. Update it before ending a session.
 
@@ -26,7 +26,7 @@ This is the **only** memory between sessions. Read it first. Update it before en
 | 2 | Asset requirements & limitations | ✅ Done | (this session) | ~moderate | 5 docs in docs/docs/n64/: textures, models-and-meshes, audio-assets, rom-budgets, asset-checklist. n64.rst toctree updated. 3 parallel explore subagents over vendored tiny3d gltf_importer, libdragon audioconv64/mixer, mksprite/rdpq_tex/BCI. Both Phase 0 open questions #8 (glTF material set) and #9 (audioconv64 .mp3) resolved. Sphinx build verified (3 pre-existing warnings, none new). |
 | 3 | `/skills` scaffold + core engine skills | ⬜ Not started | — | ~300K est | Next session. See kickoff prompt in `phased-plan.md` Phase 3. |
 | 4 | Asset & content pipeline skills | ⬜ Not started | — | ~300K est | |
-| 5 | `bf64` CLI | 🌱 Seeded | (this session) | ~400K est | Out-of-order seed now includes root `./bf64`, `--version`, `doctor`, `project status`, dry-run/executable `build`, `run`, asset/project/scene validation, read-only `asset ls/show/validate-all`, read-only `scene ls/show/validate`, history schema v2, fixture tests, and CLI CI. Not the full Phase 5 CLI yet. |
+| 5 | `bf64` CLI | 🌱 Seeded | (this session) | ~400K est | Out-of-order seed now includes root `./bf64`, `--version`, `doctor`, `new`, `project status`, dry-run/executable `build`, `run`, asset/project/scene validation, read-only `asset ls/show/validate-all`, read-only `scene ls/show/validate`, history schema v2, fixture tests, and CLI CI. Not the full Phase 5 CLI yet. |
 | 6 | MCP server | ⬜ Not started | — | ~400K est | |
 | 7 | Extensions system | ⬜ Not started | — | ~400K est (splittable 7a/7b) | |
 | 8 | CONTRIBUTING.md, vision, agent onboarding | ⬜ Not started | — | ~250K est | |
@@ -37,6 +37,49 @@ This is the **only** memory between sessions. Read it first. Update it before en
 - All N64 technical claims cite `docs/docs/n64/`; all API claims are verified against source.
 - Upstream Pyrite64 credits stay intact; divergence is tracked in `docs/docs/agent/DIVERGENCE.md`.
 - Every new capability ships with a matching skill in `/skills`.
+
+---
+
+## What this session (project generator command) completed
+
+This session added `./bf64 new` as the creation half of the agent create-build-run loop. It mirrors the headed editor's starter template, patches project identity safely, refuses accidental overwrites, and records scaffold artifacts for later review.
+
+### Files updated
+
+| File | Change |
+|---|---|
+| `tools/bf64.py` | Bumped CLI to `0.8.0`; added `new`, editor-template copying from `n64/examples/empty`, safe ROM-name generation, no-spaces path guard, `--force`, `--name`, `--rom-name`, `--emulator`, `--n64-inst`, bootstrap repair for generated project files, project validation, JSON output, and history records. |
+| `tests/test_bf64_cli.py` | Added tests for successful project creation, validation of generated projects, refusing non-empty targets, `--force` overwrites, path-space rejection, and `new --record`. |
+| `docs/docs/agent/AGENTIC_SURFACE.md` | Documented `new`, creation examples, history recording, and current backlog. |
+| `docs/docs/agent/HANDOFF.md` | Recorded this session and updated the Phase 5 seed status. |
+
+### Current preferred commands
+
+- `./bf64 --version`
+- `./bf64 new ./projects/agent_game --name "Agent Game" --json`
+- `./bf64 doctor --json`
+- `./bf64 project status --project n64/examples/empty --json`
+- `./bf64 build --project n64/examples/empty --json`
+- `./bf64 build --execute --project n64/examples/empty --pyrite64-binary ./pyrite64 --json`
+- `./bf64 run --project n64/examples/empty --json`
+- `./bf64 run --build --project n64/examples/empty --pyrite64-binary ./pyrite64 --emulator ares --json`
+- `./bf64 asset validate-all --project n64/examples/empty --json`
+- `./bf64 history list --json`
+
+### Verification
+
+- `python3 -m py_compile bf64 tools/bf64.py`
+- `python3 -m unittest discover -s tests -p 'test_*.py'`
+- `./bf64 new /tmp/<dir>/agent_game --name "Agent Game" --json`
+- `./bf64 validate /tmp/<dir>/agent_game/project.p64proj --json`
+- `PYRITE_DOCS_SKIP_DOXYGEN=1 sphinx-build -b html docs docs/_build/html` from a temporary `/tmp` venv (build succeeded with 12 existing warnings outside this change: missing/reused API page, README/faq not in toctree, and nodeGraphCustom MyST xrefs)
+
+### Remaining Phase 5 gaps
+
+- Add `import` next. Prefer a conservative asset-copy/sidecar-create flow with validation before mutation, no accidental overwrites, and history records.
+- Dedicated prefab and node-graph validators, likely after Phase 3 skills clarify the node graph API and generated C++ shape.
+- Explicit duplicate UUID repair command, with backups and history records.
+- Eventually split `tools/bf64.py` into modules once command count grows again.
 
 ---
 
@@ -74,8 +117,7 @@ This session added `./bf64 run` as the runtime half of the build/run loop. It la
 
 ### Remaining Phase 5 gaps
 
-- Add `new` next. Prefer a conservative project scaffold from the existing empty example/template behavior, with JSON output, no accidental overwrites, and history records.
-- Then `import`.
+- Add `import`.
 - Dedicated prefab and node-graph validators, likely after Phase 3 skills clarify the node graph API and generated C++ shape.
 - Explicit duplicate UUID repair command, with backups and history records.
 - Eventually split `tools/bf64.py` into modules once command count grows again.
@@ -116,7 +158,7 @@ This session made `./bf64 build --execute` call the existing C++ Pyrite64 CLI bu
 
 ### Remaining Phase 5 gaps
 
-- Add `new`, then `import`.
+- Add `import`.
 - Dedicated prefab and node-graph validators, likely after Phase 3 skills clarify the node graph API and generated C++ shape.
 - Explicit duplicate UUID repair command, with backups and history records.
 - Eventually split `tools/bf64.py` into modules once command count grows again.
@@ -158,8 +200,7 @@ This session added `./bf64 build` as a read-only build plan rather than an execu
 
 ### Remaining Phase 5 gaps
 
-- Add `run` using the project `pathEmu` and the final `<romName>.z64`.
-- `new`, then `import`.
+- Add `import`.
 - Dedicated prefab and node-graph validators, likely after Phase 3 skills clarify the node graph API and generated C++ shape.
 - Explicit duplicate UUID repair command, with backups and history records.
 - Eventually split `tools/bf64.py` into modules once command count grows again.
@@ -201,9 +242,7 @@ This session added the first project asset surface on top of the validator primi
 
 ### Remaining Phase 5 gaps
 
-- Executable `build` next, using the dry-run plan as the preflight gate.
-- Then `run` after `build` can report or create a ROM artifact.
-- `new`, then `import`.
+- Add `import`.
 - Dedicated prefab and node-graph validators, likely after Phase 3 skills clarify the node graph API and generated C++ shape.
 - Explicit duplicate UUID repair command, with backups and history records.
 - Eventually split `tools/bf64.py` into modules once command count grows again.
@@ -250,8 +289,7 @@ This session made the seed CLI easier for humans, agents, CI, and future MCP wra
 
 ### Remaining Phase 5 gaps
 
-- `build`, then `run`.
-- `new`, then `import`.
+- Add `import`.
 - Explicit duplicate UUID repair command, with backups and history records.
 - Eventually split `tools/bf64.py` into modules once command count grows again.
 
