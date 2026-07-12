@@ -117,6 +117,11 @@ add_executable(n64_engine
         engine/src/debug/overlay/ovlColors.h
         engine/include/debug/debugMenu.h
         engine/include/save/saveManager.h
+        engine/include/save/flashramDriver.h
         engine/src/save/saveManager.cpp
+        engine/src/save/flashramDriver.c
+        engine/src/save/flashramDriverInternal.h
+        engine/include/renderer/chunkMesh.h
+        engine/src/renderer/chunkMesh.cpp
         engine/src/collision/characterBody.cpp
 )

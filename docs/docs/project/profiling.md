@@ -40,4 +40,9 @@ Triangle and draw counters cover T3D model objects actually submitted after BF64
 
 `peak_rdram_used_bytes` is a conservative allocation footprint: static image + libdragon's reserved stack + live heap allocations + top-down allocations such as the depth buffer. It does not attempt to measure transient stack depth within the reserved stack.
 
-The CLI auto-detects the `dev.ares.ares` Flatpak when `ares` is not on `PATH`, grants that invocation access only to the project directory, and captures libdragon debug output. Other emulators must forward debug output to stdout for the `BF64_PROFILE_JSON:` protocol marker to be visible.
+The CLI auto-detects the `dev.ares.ares` Flatpak when `ares` is not on `PATH`, grants that invocation access only to the project directory, and enables Ares's homebrew-development mode so the ISViewer debug channel reaches stdout. Ares v148 uses `General/HomebrewMode`; post-v148 builds use the renamed `Developer/HomebrewMode`, selected from the reported emulator version. Other emulators must forward debug output to stdout for the `BF64_PROFILE_JSON:` protocol marker to be visible.
+
+The end-to-end gate has been run against Flatpak Ares v148. A 10-frame sample of
+the empty BF64 project produced valid frame/FPS percentiles, 12 submitted
+triangles per frame, RDRAM/heap figures, zero audio voices, ROM/DFS/ELF sizes,
+and BF64 revision in one `bf64.profile` artifact.

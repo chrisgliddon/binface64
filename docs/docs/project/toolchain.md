@@ -16,7 +16,7 @@ SDK discovery uses this precedence:
 3. the `N64_INST` environment variable;
 4. conventional local SDK locations, including `~/Documents/libdragon-sdk`.
 
-`toolchain detect` reports the selected source and verifies the cross-compiler plus the libdragon asset/build tools. `doctor` additionally checks BF64's build binary and emulator availability, including the `dev.ares.ares` Flatpak.
+`toolchain detect` reports the selected source and verifies the cross-compiler plus the libdragon asset/build tools. `doctor` additionally checks BF64's build binary and emulator availability, including the `dev.ares.ares` Flatpak, and reports the resolved emulator version (for example `v148`) in machine-readable JSON.
 
 ## Install from a libdragon checkout
 

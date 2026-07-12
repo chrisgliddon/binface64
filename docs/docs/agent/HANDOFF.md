@@ -40,7 +40,7 @@ This is the **only** memory between sessions. Read it first. Update it before en
 
 ---
 
-## Current implementation snapshot (2026-07-11)
+## Current implementation snapshot (2026-07-12)
 
 The historical session log below is retained for provenance, but its “remaining Phase 5 gaps” are superseded by this snapshot.
 
@@ -48,21 +48,23 @@ The historical session log below is retained for provenance, but its “remainin
 
 - Shared exclusion-aware asset selection for build and `asset validate-all`, with `--include-excluded` and separate included/excluded/skipped/passed/failed counts.
 - Atomic headless scene lifecycle, object/component mutation, asset/script attachments, stable UUIDs, dry-run, JSON/history, validation, rollback, and pair-safe prefab/node-graph CRUD/mutation.
-- Versioned `.bfui` source, UI editor/CLI/builder/runtime, Container/Image/Text/Button/TextInput/ProgressBar elements, stable IDs, controller focus/events, runtime text/visibility/image/value mutation, and threshold colors.
+- Versioned `.bfui` source, UI editor/CLI/builder/runtime, Container/Image/Text/Button/TextInput/ProgressBar elements, stable IDs, controller focus/events, runtime text/visibility/image/value mutation, threshold colors, and collapsible horizontal/vertical container flow.
 - Dedicated GUI/CLI production areas for UI, Music, SFX, 3D Environment, 3D Avatars, and Cutscenes using the shared `data/focus-areas.json` catalog and multi-area sidecar tags.
 - Structured bounded runtime profiling with frame/FPS percentiles, render counters, peak RDRAM, mixer voices, ROM/DFS/ELF sizes, target/emulator identity, and atomic JSON artifacts.
 - Merge-safe `init`/`new --merge`, project exclusion globs, Linux `toolchain detect/install`, and atomic `doctor --fix` with project-local `.bf64/env.sh`.
-- Public EEPROM 4K/16K save service with redundant banks, checksums, generations, corruption fallback, tombstone erase, migrations, host regression coverage, a standalone probe ROM, and verified two-boot Ares persistence.
-- Audio3D editor/runtime component plus listener-relative distance attenuation, equal-power pan, moving handles, first-camera listener integration, host math regression, MIPS build, and authored-project ROM build.
+- Public EEPROM 4K/16K and FlashRAM save service with redundant banks, checksums, generations, corruption fallback, tombstone erase, migrations, host regression coverage, standalone probe ROMs, and verified two-boot Ares FlashRAM persistence.
+- Audio3D editor/runtime component plus listener-relative distance attenuation, equal-power pan, moving handles, authored WAV pitch, first-camera listener integration, host regression, MIPS build, and authored-project ROM build.
 - `P64::UI::DialogueRunner` with UTF-8-safe typewriter reveal, manual/timed progression, UI/callback sinks, lifecycle events, cancellation, host regression coverage, and MIPS compilation.
+- Triple-buffered procedural `Renderer::ChunkMesh` API with per-chunk dirty copies, shared tiny3d topology, vertex-color updates, culling, allocation/triangle telemetry, host/MIPS tests, and an Ares probe ROM.
 
 ### Verification baseline
 
-- `python3 -m unittest discover -s tests -p 'test_*.py'`
+- `N64_INST=/home/chris/Documents/libdragon-sdk BF64_EDITOR_BINARY=./pyrite64 python3 -m unittest discover -s tests -p 'test_*.py'`
 - `python3 -m py_compile bf64 tools/bf64.py tools/bf64_ui.py`
 - `python3 scripts/lint-skills.py` and `python3 scripts/check-skills-package.py`
 - `N64_INST=/home/chris/Documents/libdragon-sdk make -C n64/engine -j2`
-- `N64_INST=/home/chris/Documents/libdragon-sdk make -C n64/tests/save_probe -j2`
+- `N64_INST=/home/chris/Documents/libdragon-sdk make -C n64/tests/save_probe -j2` and `make -C n64/tests/save_probe flash`
+- `N64_INST=/home/chris/Documents/libdragon-sdk make -C n64/tests/chunk_mesh_probe -j2`
 - `ninja -C build -j2 pyrite64`
 - Ares (`dev.ares.ares`) save-probe launches with graceful window close between boots
 
@@ -73,7 +75,7 @@ The historical session log below is retained for provenance, but its “remainin
 - Add authored branching/localization/control-code dialogue and visual cutscene timing only after the runtime runner is exercised.
 - Deepen Music/SFX/Environment/Avatar/Cutscene workspaces when stable domain formats (mixes, environment sets, avatar manifests, timelines) are designed; current workspaces intentionally organize existing assets.
 - MCP and a general external extension/plugin ABI remain distinct future integrations.
-- SRAM/FlashRAM, Controller Pak, rumble, dynamic music direction, room streaming, shadows, camera behaviors, LOD, and path/spline systems remain later engine backlog.
+- SRAM, Controller Pak, rumble, dynamic music direction, room streaming, shadows, camera behaviors, LOD, and path/spline systems remain later engine backlog.
 
 ---
 

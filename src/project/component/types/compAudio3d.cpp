@@ -28,6 +28,7 @@ namespace Project::Component::Audio3D
     PROP_FLOAT(minDistance);
     PROP_FLOAT(maxDistance);
     PROP_FLOAT(rolloff);
+    PROP_FLOAT(pitch);
   };
 
   std::shared_ptr<void> init(Object &)
@@ -37,6 +38,7 @@ namespace Project::Component::Audio3D
     data->minDistance.value = 50.0f;
     data->maxDistance.value = 1000.0f;
     data->rolloff.value = 1.0f;
+    data->pitch.value = 1.0f;
     return data;
   }
 
@@ -51,6 +53,7 @@ namespace Project::Component::Audio3D
       .set(data.minDistance)
       .set(data.maxDistance)
       .set(data.rolloff)
+      .set(data.pitch)
       .doc;
   }
 
@@ -64,6 +67,7 @@ namespace Project::Component::Audio3D
     Utils::JSON::readProp(doc, data->minDistance, 50.0f);
     Utils::JSON::readProp(doc, data->maxDistance, 1000.0f);
     Utils::JSON::readProp(doc, data->rolloff, 1.0f);
+    Utils::JSON::readProp(doc, data->pitch, 1.0f);
     return data;
   }
 
@@ -88,15 +92,15 @@ namespace Project::Component::Audio3D
     const float minDistance = std::max(0.0f, data.minDistance.resolve(obj));
     const float maxDistance = std::max(minDistance, data.maxDistance.resolve(obj));
     const float rolloff = std::max(0.01f, data.rolloff.resolve(obj));
+    const float pitch = std::clamp(data.pitch.resolve(obj), 0.125f, 8.0f);
 
     ctx.fileObj.write<uint16_t>(assetId);
     ctx.fileObj.write<uint16_t>(static_cast<uint16_t>(volume * 65535.0f));
     ctx.fileObj.write<float>(minDistance);
     ctx.fileObj.write<float>(maxDistance);
     ctx.fileObj.write<float>(rolloff);
+    ctx.fileObj.write<uint16_t>(static_cast<uint16_t>(pitch * 4096.0f));
     ctx.fileObj.write<uint8_t>(flags);
-    ctx.fileObj.write<uint8_t>(0);
-    ctx.fileObj.write<uint8_t>(0);
     ctx.fileObj.write<uint8_t>(0);
   }
 
@@ -113,6 +117,7 @@ namespace Project::Component::Audio3D
       ImTable::addObjProp("Min Distance", data.minDistance);
       ImTable::addObjProp("Max Distance", data.maxDistance);
       ImTable::addObjProp("Rolloff", data.rolloff);
+      ImTable::addObjProp("Pitch", data.pitch);
       ImTable::end();
     }
   }

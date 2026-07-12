@@ -4,8 +4,10 @@
  */
 #include "scene/components/audio3d.h"
 
-#include <cassert>
 #include <new>
+
+#include "assets/assetTypes.h"
+#include "lib/logger.h"
 
 namespace P64::Comp
 {
@@ -18,17 +20,25 @@ namespace P64::Comp
     }
 
     new(data) Audio3D();
-    data->audio = static_cast<wav64_t*>(AssetManager::getByIndex(initData->assetIdx));
-    assert(data->audio);
+    if(AssetManager::getTypeByIndex(initData->assetIdx) == Assets::Type::AUDIO) {
+      data->audio = static_cast<wav64_t*>(AssetManager::getByIndex(initData->assetIdx));
+    } else {
+      Log::warn("Audio3D asset %u is not a WAV64 waveform", static_cast<unsigned>(initData->assetIdx));
+    }
     data->volume = static_cast<float>(initData->volume) * (1.0f / 65535.0f);
+    data->pitch = initData->pitchQ12 == 0
+      ? 1.0f
+      : static_cast<float>(initData->pitchQ12) * (1.0f / 4096.0f);
     data->spatial = {
       .minDistance = initData->minDistance,
       .maxDistance = initData->maxDistance,
       .rolloff = initData->rolloff,
     };
     data->flags = initData->flags;
-    wav64_set_loop(data->audio, (data->flags & FLAG_LOOP) != 0);
-    if((data->flags & FLAG_AUTO_PLAY) != 0)data->play(obj.pos);
+    if(data->audio != nullptr) {
+      wav64_set_loop(data->audio, (data->flags & FLAG_LOOP) != 0);
+      if((data->flags & FLAG_AUTO_PLAY) != 0)data->play(obj.pos);
+    }
   }
 
   void Audio3D::update(Object &obj, Audio3D *data, float)
@@ -41,5 +51,6 @@ namespace P64::Comp
     handle.stop();
     handle = AudioManager::play3D(audio, position, spatial);
     handle.setVolume(volume);
+    handle.setPitch(pitch);
   }
 }

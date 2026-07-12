@@ -12,7 +12,7 @@ Add **Audio (3D)** to an object in the editor, or attach it headlessly:
   --project ./game --json
 ```
 
-The component follows its object's world position every frame. Its fields are source volume, loop, auto-play, full-volume minimum distance, silence distance, and rolloff exponent. Rolloff `1` is linear; larger values fade more quickly.
+The component follows its object's world position every frame. Its fields are source volume, pitch ratio, loop, auto-play, full-volume minimum distance, silence distance, and rolloff exponent. Rolloff `1` is linear; larger values fade more quickly. Pitch is clamped to `0.125x..8x`.
 
 The first camera in the active scene becomes the listener automatically. Code that manages a different listener can call `AudioManager::setListener(position, forward, up)` or its camera overload.
 
@@ -29,12 +29,13 @@ P64::Audio::Spatial::Settings spatial{
 
 auto handle = P64::AudioManager::play3D(audio, sourcePosition, spatial);
 handle.setVolume(0.8f);
+handle.setPitch(1.1f);
 handle.setPosition(movingSource);
 handle.setSpatialSettings(spatial);
 handle.stop();
 ```
 
-`Audio::Handle` remains safe to call after playback ends; stale handles are ignored. A handle can switch between centered 2D and spatial mixing with `setSpatial`.
+`Audio::Handle` remains safe to call after playback ends; stale handles are ignored. A handle can switch between centered 2D and spatial mixing with `setSpatial`. `setPitch` updates every channel occupied by a WAV; the older `setSpeed` name remains an alias. XM players intentionally reject per-handle pitch because tracker playback owns its own note timing.
 
 ## Mixing behavior
 

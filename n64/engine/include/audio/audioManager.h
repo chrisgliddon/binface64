@@ -40,6 +40,9 @@ namespace P64::Audio
        */
       void stop();
       void setVolume(float volume);
+      /** Playback-frequency ratio, clamped to 0.125x..8x for WAV64. */
+      void setPitch(float ratio);
+      /** Backward-compatible alias for setPitch. */
       void setSpeed(float speed);
       /** Move a positional sound without restarting playback. */
       void setPosition(const fm_vec3_t &position);
@@ -73,17 +76,15 @@ namespace P64::AudioManager
   /** Convenience overload using a BF64 camera transform. */
   void setListener(const Camera &camera);
 
-  inline Audio::Handle play2D(uint32_t assetId) {
-    return play2D((wav64_t*)AssetManager::getByIndex(assetId));
-  }
+  /** Dispatch WAV64/XM64 playback from the generated asset type tag. */
+  Audio::Handle play2D(uint32_t assetId);
 
-  inline Audio::Handle play3D(
+  /** Play a typed WAV64 asset positionally; XM64 is intentionally unsupported. */
+  Audio::Handle play3D(
     uint32_t assetId,
     const fm_vec3_t &position,
     const Audio::Spatial::Settings &settings = {}
-  ) {
-    return play3D((wav64_t*)AssetManager::getByIndex(assetId), position, settings);
-  }
+  );
 
   void stopAll();
 }

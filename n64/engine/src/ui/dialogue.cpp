@@ -128,6 +128,7 @@ void P64::UI::DialogueRunner::beginLine(size_t line)
   characterProgress_ = 0.0f;
   waitElapsed_ = 0.0f;
   visibleText_.clear();
+  visibleText_.reserve(currentBytes_);
   publishText(speakerElement_, lines_[line].speaker ? lines_[line].speaker : "");
   publishText(textElement_, "");
   state_ = DialogueState::Typing;

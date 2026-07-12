@@ -2,7 +2,7 @@
  * @copyright 2026 - BF64 contributors
  * @license MIT
  *
- * Versioned, checksummed EEPROM save slots with power-loss recovery.
+ * Versioned, checksummed cartridge save slots with power-loss recovery.
  */
 #pragma once
 
@@ -16,7 +16,9 @@ namespace P64::Save
   {
     Ok,
     NotInitialized,
+    NoSaveDevice,
     NoEeprom,
+    NoFlashRam,
     InvalidConfig,
     InvalidSlot,
     InvalidArgument,
@@ -37,6 +39,15 @@ namespace P64::Save
     None,
     Eeprom4K,
     Eeprom16K,
+    FlashRam,
+  };
+
+  enum class Backend : std::uint8_t
+  {
+    /** Prefer EEPROM when present, then try FlashRAM. */
+    Auto,
+    Eeprom,
+    FlashRam,
   };
 
   /**
@@ -59,6 +70,8 @@ namespace P64::Save
 
   struct Config
   {
+    /** Save hardware to probe. EEPROM remains the backward-compatible default. */
+    Backend backend{Backend::Eeprom};
     /** Number of logical save slots. Each slot owns two physical banks. */
     std::uint8_t slotCount{1};
     /** Maximum bytes in one game payload. */
@@ -73,6 +86,9 @@ namespace P64::Save
   {
     bool initialized{};
     Device device{Device::None};
+    /** Capacity of the selected cartridge save device. */
+    std::size_t storageBytes{};
+    /** Backward-compatible EEPROM capacity; zero for FlashRAM. */
     std::size_t eepromBytes{};
     std::uint8_t slotCount{};
     std::size_t payloadCapacity{};
@@ -94,9 +110,9 @@ namespace P64::Save
     bool migrated{};
   };
 
-  /** Probe EEPROM and validate that the redundant slot layout fits. */
+  /** Probe the configured save backend and validate the redundant slot layout. */
   Status init(const Config &config);
-  /** Forget runtime configuration. EEPROM contents are not changed. */
+  /** Forget runtime configuration. Cartridge save contents are not changed. */
   void close();
   [[nodiscard]] Info info();
 

@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <libdragon.h>
 
+#include "save/flashramDriver.h"
 #include "save/saveManager.h"
 
 namespace
@@ -51,8 +52,12 @@ namespace
   {
     console_clear();
     const auto saveInfo = P64::Save::info();
-    printf("BF64 EEPROM Save Probe\n\n");
-    printf("Device: EEPROM 16K (%lu bytes)\n", static_cast<unsigned long>(saveInfo.eepromBytes));
+    printf("BF64 Save Probe\n\n");
+    printf(
+      "Device: %s (%lu bytes)\n",
+      saveInfo.device == P64::Save::Device::FlashRam ? "FlashRAM" : "EEPROM",
+      static_cast<unsigned long>(saveInfo.storageBytes)
+    );
     printf("Layout: %u slot, %lu-byte payload\n", saveInfo.slotCount, static_cast<unsigned long>(saveInfo.payloadCapacity));
     printf("Read: %s%s\n", P64::Save::statusName(lastRead.status), lastRead.recovered ? " (recovered)" : "");
     printf("Last action: %s\n", P64::Save::statusName(lastAction));
@@ -73,6 +78,15 @@ namespace
     const auto saveInfo = P64::Save::info();
     const std::size_t bank = (lastRead.generation - 1U) & 1U;
     const std::size_t byteOffset = bank * saveInfo.bankBytes + 24;
+#ifdef BF64_SAVE_FLASHRAM
+    std::uint8_t bytes[2]{};
+    const std::size_t evenOffset = byteOffset & ~std::size_t{1};
+    bf64_flashram_read(bytes, evenOffset, sizeof(bytes));
+    bytes[byteOffset - evenOffset] ^= 0x80;
+    lastAction = bf64_flashram_write(bytes, evenOffset, sizeof(bytes)) == sizeof(bytes)
+      ? P64::Save::Status::Ok
+      : P64::Save::Status::IoError;
+#else
     std::uint8_t block[EEPROM_BLOCK_SIZE]{};
     const auto blockIndex = static_cast<std::uint8_t>(byteOffset / EEPROM_BLOCK_SIZE);
     eeprom_read(blockIndex, block);
@@ -80,6 +94,7 @@ namespace
     lastAction = eeprom_write(blockIndex, block) == 0
       ? P64::Save::Status::Ok
       : P64::Save::Status::IoError;
+#endif
     readPayload();
   }
 }
@@ -93,6 +108,11 @@ int main()
   joypad_init();
 
   P64::Save::Config config{};
+#ifdef BF64_SAVE_FLASHRAM
+  config.backend = P64::Save::Backend::FlashRam;
+#else
+  config.backend = P64::Save::Backend::Eeprom;
+#endif
   config.slotCount = 1;
   config.payloadCapacity = 512;
   config.schemaVersion = 1;

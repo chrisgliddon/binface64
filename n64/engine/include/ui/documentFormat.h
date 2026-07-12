@@ -49,6 +49,13 @@ namespace P64::UI::Format
     NATIVE,
   };
 
+  enum class Flow : uint16_t
+  {
+    NONE = 0,
+    VERTICAL,
+    HORIZONTAL,
+  };
+
   struct __attribute__((packed)) Header
   {
     uint32_t magic{};
@@ -83,6 +90,7 @@ namespace P64::UI::Format
     // ProgressBar uses otherwise-unused per-type fields as follows:
     // assetIndex=value, textOffset=max, altTextOffset/charsetOffset/maxLength=threshold maxima,
     // focus[0]=threshold count, textColor=fill color, focusColor=threshold 0 color.
+    // Container uses focus[0]=Flow and focus[1]=non-negative pixel gap.
     uint32_t thresholdColor1{};
     uint32_t thresholdColor2{};
   };

@@ -3,6 +3,7 @@
  * @license MIT
  */
 #include "save/saveManager.h"
+#include "save/flashramDriver.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -44,11 +45,37 @@ namespace P64::Save
       Record records[2]{};
       int latest{-1};
       bool hasCorruption{};
+      bool ioError{};
     };
 
-    constexpr std::size_t alignBlock(std::size_t value)
+    constexpr std::size_t alignUp(std::size_t value, std::size_t alignment)
     {
-      return (value + EEPROM_BLOCK_SIZE - 1) & ~(EEPROM_BLOCK_SIZE - 1);
+      if(alignment == 0)return 0;
+      const std::size_t remainder = value % alignment;
+      return remainder == 0 ? value : value + alignment - remainder;
+    }
+
+    bool storageRead(void *destination, std::size_t offset, std::size_t size)
+    {
+      if(activeInfo.device == Device::FlashRam) {
+        return bf64_flashram_read(destination, offset, size) == static_cast<int>(size);
+      }
+      eeprom_read_bytes(static_cast<std::uint8_t*>(destination), offset, size);
+      return true;
+    }
+
+    bool storageWrite(const void *source, std::size_t offset, std::size_t size)
+    {
+      if(activeInfo.device == Device::FlashRam) {
+        return bf64_flashram_write(source, offset, size) == static_cast<int>(size);
+      }
+      eeprom_write_bytes(static_cast<const std::uint8_t*>(source), offset, size);
+      return true;
+    }
+
+    bool storageCommitHeader(const std::uint8_t *source, std::size_t offset)
+    {
+      return eeprom_write(static_cast<std::uint8_t>(offset / EEPROM_BLOCK_SIZE), source) == 0;
     }
 
     std::uint16_t readU16(const std::uint8_t *data)
@@ -140,7 +167,10 @@ namespace P64::Save
       const std::size_t slotOffset = static_cast<std::size_t>(slot) * activeInfo.bankBytes * 2;
       for(std::size_t bank = 0; bank < 2; ++bank) {
         auto *buffer = buffers + bank * activeInfo.bankBytes;
-        eeprom_read_bytes(buffer, slotOffset + bank * activeInfo.bankBytes, activeInfo.bankBytes);
+        if(!storageRead(buffer, slotOffset + bank * activeInfo.bankBytes, activeInfo.bankBytes)) {
+          scan.ioError = true;
+          break;
+        }
         scan.records[bank] = parseRecord(buffer);
         if(scan.records[bank].state == RecordState::Corrupt) scan.hasCorruption = true;
         if(scan.records[bank].state != RecordState::Valid) continue;
@@ -179,9 +209,6 @@ namespace P64::Save
       if(size != 0) std::memcpy(buffer + HEADER_SIZE, source, size);
       writeU32(buffer + 16, crc32(buffer + HEADER_SIZE, size));
       writeU32(buffer + 20, crc32(buffer, 20));
-      // The full-bank write is deliberately invalid until the first block is
-      // written again with STATE_COMMITTED.
-      buffer[5] = STATE_WRITING;
     }
 
     Status commitRecord(
@@ -199,13 +226,27 @@ namespace P64::Save
       const std::size_t offset =
         static_cast<std::size_t>(slot) * activeInfo.bankBytes * 2 +
         static_cast<std::size_t>(bank) * activeInfo.bankBytes;
-      eeprom_write_bytes(buffer, offset, activeInfo.bankBytes);
-      buffer[5] = STATE_COMMITTED;
-      if(eeprom_write(static_cast<std::uint8_t>(offset / EEPROM_BLOCK_SIZE), buffer) != 0) {
+      // EEPROM can commit its first 8-byte block independently, so write an
+      // invalid state first and publish STATE_COMMITTED last. FlashRAM banks
+      // occupy separate erase sectors; one committed full-bank write is both
+      // safer and lower-wear, and CRC rejects a torn target sector.
+      const bool flashRam = activeInfo.device == Device::FlashRam;
+      if(!flashRam)buffer[5] = STATE_WRITING;
+      if(!storageWrite(buffer, offset, activeInfo.bankBytes)) {
         std::free(buffer);
         return Status::IoError;
       }
-      eeprom_read_bytes(buffer, offset, activeInfo.bankBytes);
+      if(!flashRam) {
+        buffer[5] = STATE_COMMITTED;
+        if(!storageCommitHeader(buffer, offset)) {
+          std::free(buffer);
+          return Status::IoError;
+        }
+      }
+      if(!storageRead(buffer, offset, activeInfo.bankBytes)) {
+        std::free(buffer);
+        return Status::IoError;
+      }
       const Record verify = parseRecord(buffer);
       const bool valid =
         verify.state == RecordState::Valid &&
@@ -223,6 +264,10 @@ namespace P64::Save
       auto *buffers = static_cast<std::uint8_t*>(std::malloc(activeInfo.bankBytes * 2));
       if(buffers == nullptr) return Status::OutOfMemory;
       const Scan scan = scanBanks(slot, buffers);
+      if(scan.ioError) {
+        std::free(buffers);
+        return Status::IoError;
+      }
       const int targetBank = scan.latest < 0 ? 0 : 1 - scan.latest;
       std::uint32_t generation = scan.latest < 0 ? 1 : scan.records[scan.latest].generation + 1;
       if(generation == 0) generation = 1;
@@ -234,23 +279,55 @@ namespace P64::Save
   Status init(const Config &config)
   {
     close();
-    const eeprom_type_t type = eeprom_present();
-    if(type == EEPROM_NONE) return Status::NoEeprom;
-    const std::size_t eepromBytes = eeprom_total_blocks() * EEPROM_BLOCK_SIZE;
     if(
       config.slotCount == 0 ||
       config.payloadCapacity == 0 ||
       config.payloadCapacity > 0xFFFF ||
       config.schemaVersion == 0
     ) return Status::InvalidConfig;
-    const std::size_t bankBytes = alignBlock(HEADER_SIZE + config.payloadCapacity);
+    Device device = Device::None;
+    std::size_t storageBytes = 0;
+    std::size_t eepromBytes = 0;
+    std::size_t bankAlignment = EEPROM_BLOCK_SIZE;
+
+    if(config.backend != Backend::FlashRam) {
+      const eeprom_type_t type = eeprom_present();
+      if(type != EEPROM_NONE) {
+        device = type == EEPROM_16K ? Device::Eeprom16K : Device::Eeprom4K;
+        eepromBytes = eeprom_total_blocks() * EEPROM_BLOCK_SIZE;
+        storageBytes = eepromBytes;
+      } else if(config.backend == Backend::Eeprom) {
+        return Status::NoEeprom;
+      }
+    }
+
+    if(device == Device::None && config.backend != Backend::Eeprom) {
+      bf64_flashram_info_t flashInfo{};
+      if(!bf64_flashram_init(nullptr, &flashInfo)) {
+        return config.backend == Backend::FlashRam ? Status::NoFlashRam : Status::NoSaveDevice;
+      }
+      if(
+        flashInfo.total_size == 0 ||
+        flashInfo.sector_size == 0 ||
+        flashInfo.sector_size > flashInfo.total_size ||
+        flashInfo.total_size % flashInfo.sector_size != 0
+      ) {
+        return config.backend == Backend::FlashRam ? Status::NoFlashRam : Status::NoSaveDevice;
+      }
+      device = Device::FlashRam;
+      storageBytes = flashInfo.total_size;
+      bankAlignment = flashInfo.sector_size;
+    }
+
+    const std::size_t bankBytes = alignUp(HEADER_SIZE + config.payloadCapacity, bankAlignment);
     const std::size_t requiredBytes = bankBytes * 2 * config.slotCount;
-    if(requiredBytes > eepromBytes) return Status::InvalidConfig;
+    if(requiredBytes > storageBytes) return Status::InvalidConfig;
 
     activeConfig = config;
     activeInfo = {
       .initialized = true,
-      .device = type == EEPROM_16K ? Device::Eeprom16K : Device::Eeprom4K,
+      .device = device,
+      .storageBytes = storageBytes,
       .eepromBytes = eepromBytes,
       .slotCount = config.slotCount,
       .payloadCapacity = config.payloadCapacity,
@@ -294,6 +371,11 @@ namespace P64::Save
       return result;
     }
     const Scan scan = scanBanks(slot, buffers);
+    if(scan.ioError) {
+      result.status = Status::IoError;
+      std::free(buffers);
+      return result;
+    }
     if(scan.latest < 0) {
       result.status = scan.hasCorruption ? Status::Corrupt : Status::Empty;
       std::free(buffers);
@@ -374,7 +456,9 @@ namespace P64::Save
     switch(status) {
       case Status::Ok: return "ok";
       case Status::NotInitialized: return "not_initialized";
+      case Status::NoSaveDevice: return "no_save_device";
       case Status::NoEeprom: return "no_eeprom";
+      case Status::NoFlashRam: return "no_flashram";
       case Status::InvalidConfig: return "invalid_config";
       case Status::InvalidSlot: return "invalid_slot";
       case Status::InvalidArgument: return "invalid_argument";

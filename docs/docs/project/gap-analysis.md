@@ -30,10 +30,11 @@ The comparison tables below intentionally preserve the reviewed **upstream Pyrit
 
 | Original gap | Current BF64 implementation |
 |---|---|
-| 2D UI/HUD, images, text, input | Versioned `.bfui` assets; dedicated GUI and CLI; Container/Image/Text/Button/TextInput/ProgressBar runtime; stable IDs, focus, events, and mutable values |
+| 2D UI/HUD, images, text, input | Versioned `.bfui` assets; dedicated GUI and CLI; Container/Image/Text/Button/TextInput/ProgressBar runtime; stable IDs, focus, mutable values, and collapsible horizontal/vertical flow |
 | Dialogue/typewriter | Input-agnostic `P64::UI::DialogueRunner` with UTF-8-safe reveal, manual/timed progression, events, and direct `.bfui` binding |
-| Save data | Public redundant/checksummed EEPROM 4K/16K slot service with generations, corruption fallback, erase tombstones, migrations, and an Ares two-boot probe |
-| Positional audio | `Audio3D` editor/runtime component and `AudioManager::play3D`, with camera listener, distance rolloff, equal-power stereo pan, and movable handles |
+| Save data | Public redundant/checksummed EEPROM 4K/16K and FlashRAM slot service with generations, corruption fallback, erase tombstones, migrations, and Ares two-boot probes |
+| Positional audio | `Audio3D` editor/runtime component and `AudioManager::play3D`, with camera listener, distance rolloff, equal-power stereo pan, movable handles, and WAV pitch control |
+| Procedural geometry | Triple-buffered `Renderer::ChunkMesh` with per-chunk dirty copies, vertex-color updates, visibility/AABB culling, and memory/triangle telemetry |
 | Headless content mutation | Atomic, validated scene, prefab, and node-graph lifecycle/object/component mutation with dry-run, JSON, recording, stable UUIDs, and rollback |
 | Production focus areas | Shared GUI/CLI areas for UI, Music, SFX, 3D Environment, 3D Avatars, and Cutscenes |
 | Runtime evidence | Bounded structured profiling plus machine-readable frame/render/memory/audio/artifact metrics |

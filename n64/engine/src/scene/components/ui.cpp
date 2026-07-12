@@ -118,20 +118,10 @@ namespace
 
   void calculateRects(P64::Comp::UI &data)
   {
-    const auto *items = elements(data.document);
-    for(uint16_t i=0; i<data.document->elementCount; ++i) {
-      P64::Comp::UI::Rect parent{0, 0, static_cast<float>(data.document->canvasWidth), static_cast<float>(data.document->canvasHeight)};
-      if(items[i].parent != UIFormat::NO_INDEX && items[i].parent < i)parent = data.rects[items[i].parent];
-      float width = parent.x1 - parent.x0;
-      float height = parent.y1 - parent.y0;
-      constexpr float Q = 1.0f / 32767.0f;
-      data.rects[i] = {
-        parent.x0 + width * static_cast<float>(items[i].anchors[0]) * Q + items[i].offsets[0],
-        parent.y0 + height * static_cast<float>(items[i].anchors[1]) * Q + items[i].offsets[1],
-        parent.x0 + width * static_cast<float>(items[i].anchors[2]) * Q + items[i].offsets[2],
-        parent.y0 + height * static_cast<float>(items[i].anchors[3]) * Q + items[i].offsets[3],
-      };
-    }
+    std::uint8_t visible[UIFormat::MAX_ELEMENTS]{};
+    const std::uint16_t count = std::min<std::uint16_t>(data.document->elementCount, UIFormat::MAX_ELEMENTS);
+    for(std::uint16_t index=0; index<count; ++index)visible[index] = data.states[index].visible ? 1 : 0;
+    P64::UI::Layout::calculate(*data.document, elements(data.document), visible, data.rects.data());
   }
 
   void drawBox(const P64::Comp::UI::Rect &rect, uint32_t packed)
@@ -217,6 +207,7 @@ void P64::Comp::UI::initDelete([[maybe_unused]] Object &obj, UI *data, uint16_t 
     data->states[i].enabled = (items[i].flags & UIFormat::ENABLED) != 0;
     if(items[i].type == UIFormat::ElementType::TEXT_INPUT) {
       data->states[i].text = stringAt(data->document, items[i].textOffset);
+      data->states[i].text.reserve(static_cast<size_t>(items[i].maxLength) * 4);
       data->states[i].hasTextOverride = true;
     } else if(items[i].type == UIFormat::ElementType::PROGRESS_BAR) {
       data->states[i].value = items[i].assetIndex;
@@ -242,6 +233,14 @@ const char* P64::Comp::UI::getText(uint32_t id) const
   if(!UIFormat::supportsText(elements(document)[index].type))return nullptr;
   if(states[index].hasTextOverride)return states[index].text.c_str();
   return stringAt(document, elements(document)[index].textOffset);
+}
+
+bool P64::Comp::UI::reserveText(uint32_t id, size_t capacity)
+{
+  const int32_t index = find(id);
+  if(index < 0 || !UIFormat::supportsText(elements(document)[index].type))return false;
+  states[index].text.reserve(capacity);
+  return true;
 }
 
 bool P64::Comp::UI::setText(uint32_t id, const char *value)

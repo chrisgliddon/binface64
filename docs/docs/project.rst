@@ -14,6 +14,7 @@ Planning and direction documents for the Binface64 fork.
   project/focus-areas
   project/toolchain
   project/profiling
+  project/procedural-mesh
   project/save-data
   project/audio3d
   project/dialogue

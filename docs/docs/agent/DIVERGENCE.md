@@ -96,6 +96,9 @@ Every BF64 change to the shared core (§3.2) gets a row here before the PR is me
 
 | Date | Change | Files | Classification | Upstream PR? | Notes |
 |---|---|---|---|---|---|
+| 2026-07-12 | Complete BF64 shippability tranche (UI flow, typed/XM-safe audio and pitch, cartridge saves, profiling, procedural chunks) | `n64/engine/*`, UI/audio editor builders, `tools/bf64.py` | BF64-only / conditional | No | Additive runtime APIs and isolated editor fields; candidate bug fixes can be split out later. FlashRAM driver is prefixed to avoid colliding when libdragon PR #925 lands. |
+| 2026-07-12 | Normalize incomplete asset sidecars and prune excluded outputs | `tools/bf64.py`, `src/build/projectBuilder.cpp` | mergeable upstream | Not opened | Standalone correctness fixes; stale T3DM stream cleanup is narrowly ownership-scoped. |
+| 2026-07-12 | Linux editor/native/MIPS regression gates | `.github/workflows/editor.yml`, `tests/` | BF64-only | No | Exercises the shared editor CLI against BF64 contracts without changing upstream release behavior. |
 | 2026-07-06 | Add BF64 project section to Sphinx docs | `docs/docs/project.rst`, `docs/docs/project/*.md`, `docs/index.rst` (+1 line) | BF64-only (additive, upstream has no equivalent section) | No | Lives in a section upstream doesn't have; the `index.rst` toctree line is the only shared-file edit and is strictly additive |
 | 2026-07-06 | Add this DIVERGENCE.md + `agent/` section | `docs/docs/agent/DIVERGENCE.md`, `docs/docs/agent.rst`, `docs/index.rst` (+1 line) | BF64-only (additive) | No | Same pattern as the project section |
 

@@ -15,7 +15,7 @@ Read this first for Binface64 work. BF64 is an agentic fork of Pyrite64: a hoste
 
 ## Version Pins
 
-- BF64 CLI surface: `tools/bf64.py`, `CLI_VERSION = "0.17.0"`.
+- BF64 CLI surface: `tools/bf64.py`, `CLI_VERSION = "0.18.0"`.
 - Constraint schema: `docs/docs/n64/limits.json`, `schema_version = 1`.
 - tiny3d source pin: `bdcd946`.
 - libdragon source pin: `b1011fe31`.

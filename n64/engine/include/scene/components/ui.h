@@ -12,6 +12,7 @@
 #include "assets/assetManager.h"
 #include "scene/event.h"
 #include "ui/documentFormat.h"
+#include "ui/layout.h"
 
 namespace P64 { class Object; }
 namespace P64::UI { class DialogueRunner; }
@@ -40,7 +41,7 @@ namespace P64::Comp
   {
     static constexpr uint32_t ID = 13;
 
-    struct Rect { float x0{}, y0{}, x1{}, y1{}; };
+    using Rect = P64::UI::Layout::Rect;
     struct State
     {
       bool visible{true};
@@ -69,6 +70,8 @@ namespace P64::Comp
 
     [[nodiscard]] int32_t find(uint32_t id) const;
     [[nodiscard]] const char* getText(uint32_t id) const;
+    /** Reserve a reusable UTF-8 buffer so recurring setText updates do not grow the heap. */
+    bool reserveText(uint32_t id, size_t capacity);
     bool setText(uint32_t id, const char *value);
     bool setVisible(uint32_t id, bool value);
     bool setEnabled(uint32_t id, bool value);

@@ -194,11 +194,11 @@ Host SDL3 + ImGui + glm + quickjs-ng app. Built by root `CMakeLists.txt` as `pyr
 | Subdir | Headers | Role |
 |---|---|---|
 | `scene/` | `scene.h`, `sceneManager.h`, `object.h`, `objectFlags.h`, `event.h`, `componentTable.h`, `camera.h`, `lighting.h`, `globalState.h`, and `components/*` | Scene mgmt, object/component model, events, 15 stable-id components including UI Document and Audio3D. |
-| `renderer/` | `pipeline.h`, `pipelineHDRBloom.h`, `pipelineBigTex.h`, `drawLayer.h`, `material.h`, `hdr/postProcess.h`, `bigtex/textures.h`, `bigtex/uvTexture.h`, `particles/ptxSystem.h`, `particles/ptxSprites.h` | 3 render pipelines, materials, big-texture streaming, particles. |
+| `renderer/` | `pipeline.h`, `pipelineHDRBloom.h`, `pipelineBigTex.h`, `drawLayer.h`, `material.h`, `chunkMesh.h`, `hdr/postProcess.h`, `bigtex/textures.h`, `bigtex/uvTexture.h`, `particles/ptxSystem.h`, `particles/ptxSprites.h` | 3 render pipelines, materials, triple-buffered procedural chunks, big-texture streaming, particles. |
 | `collision/` | 24 headers (`collisionScene.h`, `aabbTree.h`, `aabb.h`, `gjk.h`, `epa.h`, `collide.h`, `contact.h`, `colliderShape.h`, `rigidBody.h`, `meshCollider.h`, `characterBody.h`, `attach.h`, `raycast.h`, `capsuleSweep.h`, `sphereSweep.h`, `shapes.h`, `types.h`, `vecMath.h`, `matrix3x3.h`, `gfxScale.h`, `contactUtils.h`, `fmMath.h`, `fmCollision.h`, `fmTypes.h`) | Physics & collision: AABB-tree broadphase, GJK/EPA narrowphase, 6 shapes, RigidBody, MeshCollider, CharacterBody, raycast/sweep queries. |
 | `audio/` | `audioManager.h`, `spatialAudio.h` | 32-channel WAV64/XM64 mixer, handles/listener, 2D and positional playback math. |
-| `ui/` | `documentFormat.h`, `dialogue.h` | Compiled `.ui64` ABI plus input-agnostic typewriter/dialogue sequencing. |
-| `save/` | `saveManager.h` | Redundant checksummed EEPROM 4K/16K slots, migrations, erase, and status API. |
+| `ui/` | `documentFormat.h`, `layout.h`, `dialogue.h` | Compiled `.ui64` ABI, allocation-free flow layout, and input-agnostic typewriter/dialogue sequencing. |
+| `save/` | `saveManager.h`, `flashramDriver.h` | Redundant checksummed EEPROM/FlashRAM slots, migrations, erase, and cartridge driver. |
 | `assets/` | `assetManager.h`, `assetTypes.h` | Global asset table, lazy `AssetRef<T>`, `PrefabRef`. |
 | `script/` | `userScript.h`, `scriptTable.h`, `globalScript.h`, `nodeGraph.h` | User script binding (`P64_DATA` macro, `ScriptEntry` table, global hooks, node-graph coroutine). |
 | `vi/` | `swapChain.h` | Triple-buffered VI swapchain. |
@@ -224,7 +224,9 @@ Mirrors the include tree: `scene/`, `renderer/` (with `hdr/`, `bigtex/`, `partic
 | `src/renderer/hdr/*` | HDR+Bloom: `rspHDR.cpp` + `rsp_hdr.S`/`rsp_hdr.rspl` (RSP ucode), `postProcess.cpp`. |
 | `src/collision/collisionScene.cpp` | `CollisionScene::step` — full solver pipeline (detect → preSolve → warmStart → solveVelocity → solvePosition → sweptCCD → sleep → meshWorldStates). |
 | `src/audio/audioManager.cpp` | 32-channel mixer, `play2D`/`play3D`, listener updates, and movable `Audio::Handle`. |
-| `src/save/saveManager.cpp` | EEPROM redundant-bank transaction, CRC/generation validation, tombstones, and schema migrations. |
+| `src/save/{saveManager.cpp,flashramDriver.c}` | EEPROM/FlashRAM redundant-bank transaction, prefixed cartridge driver, CRC/generation validation, tombstones, and schema migrations. |
+| `src/renderer/chunkMesh.cpp` | Per-buffer dirty chunk copies, shared topology, AABB/visibility culling, draw and allocation telemetry. |
+| `src/ui/layout.cpp` | Fixed-scratch anchored and horizontal/vertical flow layout with hidden-child collapse. |
 | `src/ui/dialogue.cpp` | UTF-8-safe typewriter timing, manual/timed line progression, and text/event callbacks. |
 | `src/assets/assetManager.cpp` | Global asset table init/load/freeAll. Tagged-pointer trick (type+flags in high bits). |
 | `src/script/nodeGraph.cpp` | `NodeGraph::load` — patches bytecode first slot with C `GraphFunc` by UUID. |

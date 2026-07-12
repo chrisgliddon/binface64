@@ -91,6 +91,10 @@ namespace
       element["thresholds"] = nlohmann::json::array();
       element["style"] = {{"color", "#202020FF"}, {"fillColor", "#40C060FF"}};
     }
+    if(type == "Container") {
+      element["layout"]["flow"] = "none";
+      element["layout"]["gap"] = 0;
+    }
     return element;
   }
 }
@@ -152,7 +156,35 @@ void Editor::UIEditor::flatten(nlohmann::json &element, int parent, const ImVec4
   int index = static_cast<int>(out.size());
   out.push_back({&element, parent, rect, visible});
   if(element.contains("children") && element["children"].is_array()) {
-    for(auto &child : element["children"])flatten(child, index, rect, visible, out);
+    const auto flow = layout.value("flow", std::string{"none"});
+    const float gap = static_cast<float>(layout.value("gap", 0));
+    float cursor = flow == "horizontal" ? rect.x : rect.y;
+    for(auto &child : element["children"]) {
+      const size_t childStart = out.size();
+      flatten(child, index, rect, visible, out);
+      if(childStart >= out.size() || (flow != "vertical" && flow != "horizontal"))continue;
+      auto &childFlat = out[childStart];
+      const float extent = flow == "horizontal"
+        ? std::max(0.0f, childFlat.rect.z - childFlat.rect.x)
+        : std::max(0.0f, childFlat.rect.w - childFlat.rect.y);
+      const float delta = cursor - (flow == "horizontal" ? childFlat.rect.x : childFlat.rect.y);
+      for(size_t moved=childStart; moved<out.size(); ++moved) {
+        if(flow == "horizontal") {
+          out[moved].rect.x += delta;
+          out[moved].rect.z += delta;
+        } else {
+          out[moved].rect.y += delta;
+          out[moved].rect.w += delta;
+        }
+      }
+      if(childFlat.effectiveVisible) {
+        cursor += extent + gap;
+      } else if(flow == "horizontal") {
+        childFlat.rect.z = childFlat.rect.x;
+      } else {
+        childFlat.rect.w = childFlat.rect.y;
+      }
+    }
   }
 }
 
@@ -343,6 +375,7 @@ void Editor::UIEditor::drawInspector()
   if(ImGui::InputText("ID", &id) && !id.empty()) { (*element)["id"] = id; selectedId = id; dirty = true; }
   bool visible = element->value("visible", true);
   bool enabled = element->value("enabled", true);
+  auto type = element->value("type", std::string{});
   if(ImGui::Checkbox("Visible", &visible)) { (*element)["visible"] = visible; dirty = true; }
   ImGui::SameLine();
   if(ImGui::Checkbox("Enabled", &enabled)) { (*element)["enabled"] = enabled; dirty = true; }
@@ -358,7 +391,23 @@ void Editor::UIEditor::drawInspector()
     layout["offsets"] = offsets; dirty = true;
   }
 
-  auto type = element->value("type", std::string{});
+  if(type == "Container") {
+    constexpr std::array<const char*, 3> FLOW_NAMES{"none", "vertical", "horizontal"};
+    std::string flow = layout.value("flow", std::string{"none"});
+    int flowIndex = flow == "vertical" ? 1 : flow == "horizontal" ? 2 : 0;
+    int gap = layout.contains("gap") && layout["gap"].is_number_integer()
+      ? layout["gap"].get<int>()
+      : 0;
+    if(ImGui::Combo("Flow", &flowIndex, FLOW_NAMES.data(), static_cast<int>(FLOW_NAMES.size()))) {
+      layout["flow"] = FLOW_NAMES[flowIndex];
+      dirty = true;
+    }
+    if(ImGui::DragInt("Flow gap", &gap, 1, 0, 32767)) {
+      layout["gap"] = std::clamp(gap, 0, 32767);
+      dirty = true;
+    }
+  }
+
   if(type == "Text" || type == "Button") {
     std::string text = element->value("text", std::string{});
     if(ImGui::InputTextMultiline("Text", &text)) { (*element)["text"] = text; dirty = true; }
@@ -672,6 +721,16 @@ void Editor::UIEditor::validate()
           auto number = value.template get<double>();
           return number < -32768.0 || number > 32767.0 || std::floor(number) != number;
         }))issue("Element " + id + " offsets must be signed 16-bit integers");
+      }
+      const auto flow = layout.value("flow", std::string{"none"});
+      if(flow != "none" && flow != "vertical" && flow != "horizontal") {
+        issue("Element " + id + " flow must be none, vertical, or horizontal");
+      } else if(flow != "none" && type != "Container") {
+        issue("Element " + id + " flow is only supported on Container elements");
+      }
+      const auto gapValue = layout.value("gap", nlohmann::json{0});
+      if(!gapValue.is_number_integer() || gapValue.get<int64_t>() < 0 || gapValue.get<int64_t>() > 32767) {
+        issue("Element " + id + " flow gap must be an integer in 0..32767");
       }
     }
     for(const char *field : {"visible", "enabled"})if(element.contains(field) && !element[field].is_boolean()) {

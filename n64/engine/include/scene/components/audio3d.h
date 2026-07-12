@@ -24,13 +24,15 @@ namespace P64::Comp
       float minDistance;
       float maxDistance;
       float rolloff;
+      uint16_t pitchQ12;
       uint8_t flags;
-      uint8_t padding[3];
+      uint8_t padding;
     };
 
     wav64_t *audio{};
     Audio::Spatial::Settings spatial{};
     float volume{1.0f};
+    float pitch{1.0f};
     uint8_t flags{};
     Audio::Handle handle{};
 
@@ -45,5 +47,6 @@ namespace P64::Comp
     void play(const fm_vec3_t &position);
     void stop() { handle.stop(); }
     void setVolume(float value) { volume = value; handle.setVolume(value); }
+    void setPitch(float value) { pitch = value; handle.setPitch(value); }
   };
 }

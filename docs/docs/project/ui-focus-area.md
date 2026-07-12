@@ -8,6 +8,26 @@ UI source assets use versioned, human-editable `.bfui` JSON. The editor build co
 
 A v1 document declares a target canvas, safe area, integer snap size, and a rooted element tree. Supported elements are `Container`, `Image`, `Text`, `Button`, `TextInput`, and `ProgressBar`. Every element has a unique stable string `id`, anchored layout, pixel offsets, visibility/enabled state, style colors, and optional children. Images and fonts may be referenced by asset UUID or by an `assets/<path>` string. Image fit can be `stretch` or `native`; text inputs declare their controller keyboard `charset`, maximum length, and whether Start submits the value.
 
+Containers can opt into simple stack reflow with `layout.flow: "vertical"` or
+`"horizontal"` and an integer `layout.gap`. Direct children retain their
+authored width/height and are laid out in sibling order. A hidden direct child
+collapses out of the stack, so later HUD rows move into its place. `"none"`
+keeps the normal anchored layout.
+
+```json
+{
+  "id": "resources",
+  "type": "Container",
+  "layout": {
+    "anchors": [0, 0, 0, 0],
+    "offsets": [8, 8, 120, 100],
+    "flow": "vertical",
+    "gap": 4
+  },
+  "children": []
+}
+```
+
 `ProgressBar` stores integer `value` and `max` fields in the unsigned 16-bit range, a `style.fillColor`, and up to three optional thresholds. Thresholds are absolute upper bounds, must be strictly ascending in `0..max`, and select the first matching color:
 
 ```json
@@ -33,6 +53,7 @@ Open **Focus → UI** in the editor. The UI workspace lists `.bfui` documents an
 
 - N64-resolution canvas preview and safe-area overlay;
 - anchored positioning, pixel offsets, snap-aware drag and resize;
+- container flow direction/gap with hidden-child collapse in the preview;
 - element creation, deletion, and sibling reordering;
 - source image/font assignment and text/input properties;
 - progress values, fill color, and ordered color thresholds;
@@ -65,13 +86,14 @@ Runtime element IDs use the `_ui` literal, which matches the builder's CRC32 val
 
 auto *ui = obj.getComponent<P64::Comp::UI>();
 ui->setText("score"_ui, "100");
+ui->reserveText("score"_ui, 24); // optional, before recurring formatted updates
 ui->setValue("health"_ui, 75, 100);
 ui->setVisible("pausePanel"_ui, true);
 ui->focus("nameInput"_ui);
 const char *name = ui->getText("nameInput"_ui);
 ```
 
-`setValue` rejects missing/non-ProgressBar IDs and a zero maximum. Values above the supplied maximum are clamped.
+`setValue` rejects missing/non-ProgressBar IDs and a zero maximum. Values above the supplied maximum are clamped. `setVisible` immediately recalculates layout, including flow-container collapse. Text inputs reserve their authored UTF-8 maximum and `DialogueRunner` reserves each full line; call `reserveText` once for other text that is reformatted frequently so steady-state updates do not grow the heap.
 
 Buttons emit `EVENT_TYPE_UI_ACTIVATE`. Text edits emit `EVENT_TYPE_UI_CHANGE`, and Start submits with `EVENT_TYPE_UI_SUBMIT`. The event value is the stable element ID; query the UI component for current input text.
 
@@ -103,4 +125,4 @@ The runner is input-agnostic: game code chooses the confirm button and coordinat
 
 ## V1 boundaries
 
-V1 intentionally excludes expression data binding, localization tables, authored branching-dialogue assets, inline control codes/choices, flex/grid layout, nine-slice images, and node-graph UI bindings. Runtime typewriter sequencing is available through `DialogueRunner`; richer authored tracks can layer onto the stable document, component, and event interfaces without changing element IDs.
+V1 intentionally excludes expression data binding, localization tables, authored branching-dialogue assets, inline control codes/choices, general flex/grid layout, nine-slice images, and node-graph UI bindings. Simple horizontal/vertical container flow is supported. Runtime typewriter sequencing is available through `DialogueRunner`; richer authored tracks can layer onto the stable document, component, and event interfaces without changing element IDs.

@@ -151,6 +151,12 @@ void* P64::AssetManager::getByIndex(uint32_t idx) {
   return res;
 }
 
+uint8_t P64::AssetManager::getTypeByIndex(uint32_t idx)
+{
+  if(idx >= assetTable->count)return Assets::Type::UNKNOWN;
+  return static_cast<uint8_t>(assetTable->entries[idx].getType());
+}
+
 const char* P64::AssetManager::getPathByIndex(uint32_t idx)
 {
   if (idx >= assetTable->count) {

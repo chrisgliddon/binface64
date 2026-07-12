@@ -74,6 +74,14 @@ namespace
     throw std::runtime_error("Unknown UI text alignment: " + align);
   }
 
+  UIFormat::Flow parseFlow(const std::string &flow)
+  {
+    if(flow == "none")return UIFormat::Flow::NONE;
+    if(flow == "vertical")return UIFormat::Flow::VERTICAL;
+    if(flow == "horizontal")return UIFormat::Flow::HORIZONTAL;
+    throw std::runtime_error("Unknown UI container flow: " + flow);
+  }
+
   Project::AssetManagerEntry* resolveAsset(Project::Project &project, const nlohmann::json &reference)
   {
     auto &assets = project.getAssets();
@@ -241,6 +249,19 @@ namespace
           }
           element.focus[i] = targetIndex;
         }
+      }
+
+      const auto flow = parseFlow(layout.value("flow", std::string{"none"}));
+      const int gap = layout.value("gap", 0);
+      if(flow != UIFormat::Flow::NONE && element.type != UIFormat::ElementType::CONTAINER) {
+        throw std::runtime_error("UI flow is only supported on Container elements");
+      }
+      if(gap < 0 || gap > std::numeric_limits<int16_t>::max()) {
+        throw std::runtime_error("UI flow gap exceeds 0..32767");
+      }
+      if(element.type == UIFormat::ElementType::CONTAINER) {
+        element.focus[0] = static_cast<uint16_t>(flow);
+        element.focus[1] = static_cast<uint16_t>(gap);
       }
 
       if(element.type == UIFormat::ElementType::PROGRESS_BAR) {

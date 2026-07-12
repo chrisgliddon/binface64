@@ -4,8 +4,10 @@ import struct
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -679,6 +681,121 @@ class Bf64CliTests(unittest.TestCase):
         self.assertTrue(data["validation"]["ok"])
         self.assertEqual(data["validation"]["metadata"]["format"], "RGBA16")
 
+    def test_asset_show_normalizes_incomplete_sidecar_without_rewriting_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "game"
+            self.write_minimal_project(project)
+            texture = project / "assets" / "optional.png"
+            texture.parent.mkdir()
+            self.write_png_header(texture, 32, 32)
+            sidecar = Path(str(texture) + ".conf")
+            original = '{"exclude":true}'
+            sidecar.write_text(original, encoding="utf-8")
+
+            proc, data = self.run_json(
+                "asset", "show", "assets/optional.png", "--project", str(project), "--json"
+            )
+
+            self.assertEqual(sidecar.read_text(encoding="utf-8"), original)
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertEqual(
+            data["conf"],
+            {
+                "uuid": 0,
+                "format": 0,
+                "baseScale": 16,
+                "compression": 0,
+                "gltfBVH": False,
+                "wavForceMono": False,
+                "wavResampleRate": 0,
+                "wavCompression": 0,
+                "fontId": 0,
+                "fontCharset": "",
+                "exclude": True,
+                "data": {},
+            },
+        )
+        self.assertEqual(
+            data["asset"]["conf_defaulted_fields"],
+            [
+                "uuid",
+                "format",
+                "baseScale",
+                "compression",
+                "gltfBVH",
+                "wavForceMono",
+                "wavResampleRate",
+                "wavCompression",
+                "fontId",
+                "fontCharset",
+                "data",
+            ],
+        )
+
+    def test_asset_show_uses_editor_defaults_for_wrongly_typed_sidecar_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "game"
+            self.write_minimal_project(project)
+            texture = project / "assets" / "optional.png"
+            texture.parent.mkdir()
+            self.write_png_header(texture, 32, 32)
+            Path(str(texture) + ".conf").write_text(
+                json.dumps(
+                    {
+                        "uuid": "not-an-id",
+                        "format": None,
+                        "baseScale": "sixteen",
+                        "compression": [],
+                        "gltfBVH": "true",
+                        "wavForceMono": 1,
+                        "wavResampleRate": "22050",
+                        "wavCompression": {},
+                        "fontId": -1,
+                        "fontCharset": 42,
+                        "exclude": "true",
+                        "data": "not-an-object",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            proc, data = self.run_json(
+                "asset", "show", "assets/optional.png", "--project", str(project), "--json"
+            )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(data["conf"]["uuid"], 0)
+        self.assertEqual(data["conf"]["format"], 0)
+        self.assertEqual(data["conf"]["baseScale"], 16)
+        self.assertEqual(data["conf"]["compression"], 0)
+        self.assertIs(data["conf"]["gltfBVH"], False)
+        self.assertIs(data["conf"]["wavForceMono"], False)
+        self.assertEqual(data["conf"]["wavResampleRate"], 0)
+        self.assertEqual(data["conf"]["wavCompression"], 0)
+        self.assertEqual(data["conf"]["fontId"], 0)
+        self.assertEqual(data["conf"]["fontCharset"], "")
+        self.assertIs(data["conf"]["exclude"], False)
+        self.assertEqual(data["conf"]["data"], {})
+        self.assertEqual(
+            data["asset"]["conf_defaulted_fields"],
+            [
+                "uuid",
+                "format",
+                "baseScale",
+                "compression",
+                "gltfBVH",
+                "wavForceMono",
+                "wavResampleRate",
+                "wavCompression",
+                "fontId",
+                "fontCharset",
+                "exclude",
+                "data",
+            ],
+        )
+
     def test_asset_validate_all_empty_project_skips_unknown_sources(self) -> None:
         proc, data = self.run_json("asset", "validate-all", "--project", "n64/examples/empty", "--json")
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -762,6 +879,58 @@ class Bf64CliTests(unittest.TestCase):
         self.assertEqual(data["summary"]["passed"], 1)
         self.assertEqual(data["results"][0]["metadata"]["progress_bar_count"], 1)
 
+    def test_ui_validation_accepts_vertical_flow_containers_for_collapsible_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "game"
+            self.write_minimal_project(project)
+            ui_path = project / "assets" / "hud.bfui"
+            ui_path.parent.mkdir()
+            ui_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "bf64.ui",
+                        "version": 1,
+                        "canvas": {"width": 320, "height": 240},
+                        "root": {
+                            "id": "resources",
+                            "type": "Container",
+                            "layout": {
+                                "anchors": [0, 0, 0, 0],
+                                "offsets": [8, 8, 108, 88],
+                                "flow": "vertical",
+                                "gap": 4,
+                            },
+                            "children": [
+                                {
+                                    "id": "stamina-row",
+                                    "type": "Container",
+                                    "layout": {"anchors": [0, 0, 0, 0], "offsets": [0, 0, 100, 12]},
+                                },
+                                {
+                                    "id": "bladder-row",
+                                    "type": "Container",
+                                    "layout": {"anchors": [0, 0, 0, 0], "offsets": [0, 0, 100, 12]},
+                                },
+                                {
+                                    "id": "money-row",
+                                    "type": "Container",
+                                    "layout": {"anchors": [0, 0, 0, 0], "offsets": [0, 0, 100, 12]},
+                                },
+                            ],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            proc, data = self.run_json(
+                "ui", "validate", "assets/hud.bfui", "--project", str(project), "--json"
+            )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["results"][0]["metadata"]["flow_container_count"], 1)
+
     def test_ui_validation_rejects_invalid_progress_value_and_threshold_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp) / "game"
@@ -832,6 +1001,47 @@ class Bf64CliTests(unittest.TestCase):
         self.assertEqual(data["summary"]["passed"], 1)
         self.assertEqual(data["summary"]["failed"], 1)
         self.assertEqual({item["path"] for item in data["results"]}, {str(included), str(excluded)})
+
+    def test_asset_validate_all_reports_defaults_applied_to_a_minimal_excluded_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "game"
+            self.write_minimal_project(project)
+            texture = project / "assets" / "optional.png"
+            texture.parent.mkdir()
+            self.write_png_header(texture, 32, 32)
+            Path(str(texture) + ".conf").write_text(
+                json.dumps({"exclude": True}), encoding="utf-8"
+            )
+
+            proc, data = self.run_json(
+                "asset",
+                "validate-all",
+                "--project",
+                str(project),
+                "--include-excluded",
+                "--json",
+            )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["summary"]["passed"], 1)
+        self.assertEqual(data["summary"]["failed"], 0)
+        self.assertEqual(
+            data["results"][0]["metadata"]["conf_defaulted_fields"],
+            [
+                "uuid",
+                "format",
+                "baseScale",
+                "compression",
+                "gltfBVH",
+                "wavForceMono",
+                "wavResampleRate",
+                "wavCompression",
+                "fontId",
+                "fontCharset",
+                "data",
+            ],
+        )
 
     def test_include_excluded_source_audit_fails_a_malformed_excluded_wav(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1737,6 +1947,46 @@ class Bf64CliTests(unittest.TestCase):
         self.assertEqual(argv[:3], ["--cli", "--cmd", "build"])
         self.assertEqual(Path(argv[3]).name, "project.p64proj")
 
+    def test_build_execute_preserves_absolute_project_config_from_unrelated_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "game"
+            outside = root / "outside"
+            sdk = root / "sdk"
+            binary = root / "pyrite64"
+            log_path = root / "argv.json"
+            outside.mkdir()
+            self.write_fake_sdk(sdk)
+            self.write_minimal_project(project, {"pathN64Inst": str(sdk)})
+            self.write_fake_pyrite64(binary, log_path)
+            config_path = (project / "project.p64proj").resolve()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(CLI),
+                    "build",
+                    "--execute",
+                    "--project",
+                    str(config_path),
+                    "--pyrite64-binary",
+                    str(binary),
+                    "--json",
+                ],
+                cwd=outside,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            data = json.loads(proc.stdout)
+            argv = json.loads(log_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(data["ok"])
+        self.assertEqual(Path(data["project"]["config_path"]), config_path)
+        self.assertEqual(Path(data["execute"]["argv"][4]), config_path)
+        self.assertEqual(Path(argv[3]), config_path)
+
     def test_build_execute_missing_binary_uses_exit_code_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1940,6 +2190,81 @@ class Bf64CliTests(unittest.TestCase):
         self.assertEqual(artifact["runtime"]["frame_time_ms"]["p95"], 18.0)
         self.assertEqual(Path(emu_argv[-1]).name, "fixture.z64")
         self.assertTrue(any(item["kind"] == "profile" for item in data["artifacts"]))
+
+    def test_profile_launch_enables_the_versioned_ares_homebrew_debug_channel(self) -> None:
+        spec = importlib.util.spec_from_file_location("bf64_profile_argv_test", ROOT / "tools" / "bf64.py")
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        project = ROOT / "n64" / "examples" / "empty"
+        rom = project / "fixture.z64"
+
+        v148 = module.prepare_emulator_argv(
+            ["flatpak", "run", "dev.ares.ares"],
+            project,
+            rom,
+            homebrew_mode=True,
+            emulator_version_text="v148",
+        )
+        current = module.prepare_emulator_argv(
+            ["ares"],
+            project,
+            rom,
+            homebrew_mode=True,
+            emulator_version_text="ares version v149",
+        )
+
+        self.assertIn("General/HomebrewMode=true", v148)
+        self.assertNotIn("Developer/HomebrewMode=true", v148)
+        self.assertIn("Developer/HomebrewMode=true", current)
+        self.assertNotIn("General/HomebrewMode=true", current)
+        self.assertEqual(v148[-1], str(rom))
+        self.assertEqual(current[-1], str(rom))
+
+    def test_flatpak_launch_resolves_relative_filesystem_and_rom_paths(self) -> None:
+        spec = importlib.util.spec_from_file_location("bf64_flatpak_paths_test", ROOT / "tools" / "bf64.py")
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        project = Path("n64/examples/empty")
+        rom = project / "fixture.z64"
+        argv = module.prepare_emulator_argv(
+            ["flatpak", "run", "dev.ares.ares"],
+            project,
+            rom,
+        )
+
+        self.assertIn(f"--filesystem={project.resolve()}", argv)
+        self.assertEqual(argv[-1], str(rom.resolve()))
+
+    def test_doctor_flatpak_discovery_reports_ares_version(self) -> None:
+        spec = importlib.util.spec_from_file_location("bf64_doctor_ares_test", ROOT / "tools" / "bf64.py")
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        def fake_run(argv, **_kwargs):
+            if "info" in argv:
+                return types.SimpleNamespace(returncode=0, stdout="Version: 148\n", stderr="")
+            return types.SimpleNamespace(returncode=0, stdout="\nv148\n", stderr="")
+
+        with (
+            mock.patch.object(
+                module.shutil,
+                "which",
+                side_effect=lambda name: "/usr/bin/flatpak" if name == "flatpak" else None,
+            ),
+            mock.patch.object(module.subprocess, "run", side_effect=fake_run),
+        ):
+            available, detail, version = module.doctor_emulator_status()
+
+        self.assertTrue(available)
+        self.assertIn("dev.ares.ares", detail)
+        self.assertEqual(version, "v148")
 
     def test_run_build_profile_passes_sampling_configuration_to_native_builder(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2414,6 +2739,79 @@ class Bf64CliTests(unittest.TestCase):
         self.assertEqual(component["id"], 13)
         self.assertEqual(component["data"], {"document": ui_uuid, "layer": 0, "active": True})
 
+    def test_scene_object_component_ui_round_trip_is_stable_and_removable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "game"
+            self.write_minimal_project(project)
+            ui_proc, _ui_data = self.run_json(
+                "ui", "new", "hud", "--project", str(project), "--json"
+            )
+            add_proc, _add_data = self.run_json(
+                "scene", "object", "add", "1", "--name", "HUD", "--uuid", "100",
+                "--position", "1", "2", "3", "--project", str(project), "--json"
+            )
+            attach_proc, attach_data = self.run_json(
+                "scene", "attach", "ui", "1", "100", "assets/hud.bfui",
+                "--project", str(project), "--json"
+            )
+            component_uuid = attach_data["component"]["uuid"]
+            update_object_proc, _update_object_data = self.run_json(
+                "scene", "object", "update", "1", "100", "--name", "Gameplay HUD",
+                "--position", "4", "5", "6", "--rotation", "0", "0", "0", "1",
+                "--scale", "2", "2", "2", "--project", str(project), "--json"
+            )
+            update_component_proc, _update_component_data = self.run_json(
+                "scene", "component", "update", "1", "100", str(component_uuid),
+                "--data", '{"layer":2,"active":false}', "--project", str(project), "--json"
+            )
+            first_show_proc, first_show = self.run_json(
+                "scene", "show", "1", "--project", str(project), "--json"
+            )
+            second_show_proc, second_show = self.run_json(
+                "scene", "show", "1", "--project", str(project), "--json"
+            )
+            validate_proc, validate_data = self.run_json(
+                "validate", str(project / "project.p64proj"), "--json"
+            )
+            remove_component_proc, _remove_component_data = self.run_json(
+                "scene", "component", "remove", "1", "100", str(component_uuid),
+                "--project", str(project), "--json"
+            )
+            remove_object_proc, _remove_object_data = self.run_json(
+                "scene", "object", "remove", "1", "100", "--project", str(project), "--json"
+            )
+            final_show_proc, final_show = self.run_json(
+                "scene", "show", "1", "--project", str(project), "--json"
+            )
+
+        for proc in (
+            ui_proc,
+            add_proc,
+            attach_proc,
+            update_object_proc,
+            update_component_proc,
+            first_show_proc,
+            second_show_proc,
+            validate_proc,
+            remove_component_proc,
+            remove_object_proc,
+            final_show_proc,
+        ):
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(validate_data["ok"])
+        self.assertEqual(first_show["doc"], second_show["doc"])
+        stored = first_show["doc"]["graph"]["children"][0]
+        self.assertEqual(stored["uuid"], 100)
+        self.assertEqual(stored["name"], "Gameplay HUD")
+        self.assertEqual(stored["pos"], [4.0, 5.0, 6.0])
+        self.assertEqual(stored["rot"], [0.0, 0.0, 0.0, 1.0])
+        self.assertEqual(stored["scale"], [2.0, 2.0, 2.0])
+        self.assertEqual(len(stored["components"]), 1)
+        self.assertEqual(stored["components"][0]["uuid"], component_uuid)
+        self.assertEqual(stored["components"][0]["data"]["layer"], 2)
+        self.assertIs(stored["components"][0]["data"]["active"], False)
+        self.assertEqual(final_show["doc"]["graph"]["children"], [])
+
     def test_scene_attach_audio3d_resolves_audio_and_spatial_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp) / "game"
@@ -2447,7 +2845,34 @@ class Bf64CliTests(unittest.TestCase):
                 "minDistance": 50.0,
                 "maxDistance": 750,
                 "rolloff": 1.0,
+                "pitch": 1.0,
             },
+        )
+
+    def test_scene_attach_audio3d_rejects_xm_music_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "game"
+            self.write_minimal_project(project)
+            music = project / "assets" / "music" / "theme.xm"
+            music.parent.mkdir(parents=True)
+            music.write_bytes(b"Extended Module: fixture")
+            Path(str(music) + ".conf").write_text(
+                json.dumps({"uuid": 7002}), encoding="utf-8"
+            )
+            self.run_json(
+                "scene", "object", "add", "1", "--name", "Radio", "--uuid", "100",
+                "--project", str(project), "--json"
+            )
+
+            attach_proc, attach_data = self.run_json(
+                "scene", "attach", "audio3d", "1", "100", "music/theme.xm",
+                "--project", str(project), "--json"
+            )
+
+        self.assertEqual(attach_proc.returncode, 1, attach_proc.stderr)
+        self.assertFalse(attach_data["ok"])
+        self.assertTrue(
+            any(issue["rule"] == "SCENE_COMPONENT_ASSET" for issue in attach_data["issues"])
         )
 
     def test_scene_attach_maps_camera_model_collision_and_light_adapters(self) -> None:
@@ -2888,6 +3313,7 @@ class Bf64CliTests(unittest.TestCase):
 #include <cstdint>
 #include <cstring>
 #include "save/saveManager.h"
+#include "save/flashramDriver.h"
 #include "eeprom.h"
 
 namespace {
@@ -2929,6 +3355,9 @@ extern "C" void eeprom_read_bytes(std::uint8_t *dest, std::size_t start, std::si
 extern "C" void eeprom_write_bytes(const std::uint8_t *src, std::size_t start, std::size_t len) {
   std::memcpy(storage.data() + start, src, len);
 }
+extern "C" bool bf64_flashram_init(const bf64_flashram_timings_t*, bf64_flashram_info_t*) { return false; }
+extern "C" int bf64_flashram_read(void*, std::size_t, std::size_t) { return -1; }
+extern "C" int bf64_flashram_write(const void*, std::size_t, std::size_t) { return -1; }
 
 int main() {
   using namespace P64::Save;
@@ -3062,15 +3491,27 @@ int main() {
 
   conf.format = 7;
   conf.gltfBVH = true;
+  conf.wavResampleRate.value = 22050;
+  conf.fontId.value = 3;
   nlohmann::json wrongTypes = {
+    {"uuid", -1},
     {"format", nullptr},
+    {"baseScale", 1.5},
     {"gltfBVH", "not-a-boolean"},
+    {"wavResampleRate", -1},
+    {"fontId", -1},
     {"exclude", true},
+    {"data", "not-an-object"},
   };
   conf.deserialize(wrongTypes);
+  assert(conf.uuid == uuid);
   assert(conf.format == 7);
+  assert(conf.baseScale == 16);
   assert(conf.gltfBVH);
+  assert(conf.wavResampleRate.value == 22050);
+  assert(conf.fontId.value == 3);
   assert(conf.exclude);
+  assert(conf.data.is_object());
   return 0;
 }
 ''',

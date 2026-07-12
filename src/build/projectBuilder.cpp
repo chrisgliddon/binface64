@@ -36,6 +36,27 @@ namespace
     // must be last: (@TODO: handle prefab referencing prefab, [not in the editor yet])
     {Build::buildPrefabAssets,  "Prefab"},
   });
+
+  void pruneExcludedAssetOutputs(
+    const fs::path &projectPath,
+    const Project::AssetManagerEntry &entry)
+  {
+    if(entry.outPath.empty())return;
+    const fs::path output = projectPath / entry.outPath;
+    fs::remove(output);
+    if(entry.type != Project::FileType::MODEL_3D)return;
+
+    const fs::path directory = output.parent_path();
+    if(!fs::is_directory(directory))return;
+    const std::string prefix = output.stem().string() + ".";
+    for(const auto &candidate : fs::directory_iterator{directory}) {
+      if(!candidate.is_regular_file())continue;
+      const fs::path path = candidate.path();
+      if(path.extension() == ".sdata" && path.filename().string().starts_with(prefix)) {
+        fs::remove(path);
+      }
+    }
+  }
 }
 
 void Build::SceneCtx::addAsset(const Project::AssetManagerEntry &entry)
@@ -104,7 +125,11 @@ bool Build::buildProject(const std::string &configPath)
   // Asset-Manager
   for (auto &typed : project.getAssets().getEntries()) {
     for (auto &entry : typed) {
-      if (entry.isExcluded() || entry.type == Project::FileType::UNKNOWN
+      if(entry.isExcluded()) {
+        pruneExcludedAssetOutputs(path, entry);
+        continue;
+      }
+      if (entry.type == Project::FileType::UNKNOWN
         || entry.type == Project::FileType::CODE_OBJ
         || entry.type == Project::FileType::CODE_GLOBAL
       ) continue;

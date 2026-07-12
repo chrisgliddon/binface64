@@ -182,6 +182,7 @@ def validate_ui_document(
         "element_count": 0,
         "focusable_count": 0,
         "progress_bar_count": 0,
+        "flow_container_count": 0,
         "project": str(project_root) if project_root else None,
         "element_hashes": {},
     }
@@ -313,6 +314,36 @@ def validate_ui_document(
                     f"{location}.layout.offsets must be integers in the signed 16-bit range.",
                 )
             )
+
+        flow = layout.get("flow", "none")
+        gap = layout.get("gap", 0)
+        if flow not in {"none", "vertical", "horizontal"}:
+            issues.append(
+                ui_issue(
+                    "error",
+                    "UI_FLOW",
+                    f"{location}.layout.flow must be none, vertical, or horizontal.",
+                )
+            )
+            flow = "none"
+        if not isinstance(gap, int) or isinstance(gap, bool) or gap < 0 or gap > 32767:
+            issues.append(
+                ui_issue(
+                    "error",
+                    "UI_FLOW",
+                    f"{location}.layout.gap must be an integer from 0 to 32767.",
+                )
+            )
+        if flow != "none" and element_type != "Container":
+            issues.append(
+                ui_issue(
+                    "error",
+                    "UI_FLOW",
+                    f"{location}.layout.flow is only supported on Container elements.",
+                )
+            )
+        elif flow != "none":
+            metadata["flow_container_count"] += 1
 
         px0, py0, px1, py1 = parent_rect
         parent_w, parent_h = px1 - px0, py1 - py0

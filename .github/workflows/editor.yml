@@ -88,6 +88,11 @@ jobs:
         run: |
           ./scripts/build_appimage.sh
 
+      - name: Run editor CLI integration tests
+        env:
+          BF64_EDITOR_BINARY: ./pyrite64
+        run: python3 -m unittest discover -s tests -p 'test_editor_cli.py'
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v6
         with:

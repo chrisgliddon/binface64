@@ -31,6 +31,9 @@ namespace P64::AssetManager
    */
   void* getByIndex(uint32_t idx);
 
+  /** Return the P64::Assets::Type tag without loading the asset. */
+  uint8_t getTypeByIndex(uint32_t idx);
+
   const char* getPathByIndex(uint32_t idx);
 }
 

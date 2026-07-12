@@ -40,7 +40,7 @@ FOCUS_AREAS_PATH = REPO_ROOT / "data" / "focus-areas.json"
 DEFAULT_HISTORY_PATH = REPO_ROOT / ".bf64" / "operations.jsonl"
 PROJECT_FILENAME = "project.p64proj"
 EMPTY_PROJECT_TEMPLATE = REPO_ROOT / "n64" / "examples" / "empty"
-CLI_VERSION = "0.17.0"
+CLI_VERSION = "0.18.0"
 HISTORY_SCHEMA_VERSION = 2
 PROFILE_SCHEMA_VERSION = 1
 PROFILE_MARKER = "BF64_PROFILE_JSON:"
@@ -60,6 +60,23 @@ BUILD_TOOLCHAIN_FILES = (
     ("mkdfs", "bin/mkdfs"),
     ("n64tool", "bin/n64tool"),
 )
+ASSET_CONF_DEFAULTS: dict[str, Any] = {
+    "uuid": 0,
+    "format": 0,
+    "baseScale": 16,
+    "compression": 0,
+    "gltfBVH": False,
+    "wavForceMono": False,
+    "wavResampleRate": 0,
+    "wavCompression": 0,
+    "fontId": 0,
+    "fontCharset": "",
+    "exclude": False,
+    "data": {},
+}
+ASSET_CONF_BOOL_FIELDS = {"gltfBVH", "wavForceMono", "exclude"}
+ASSET_CONF_SIGNED_FIELDS = {"format", "baseScale", "compression", "wavCompression"}
+ASSET_CONF_UNSIGNED_FIELDS = {"wavResampleRate", "fontId"}
 
 COMPONENT_NAMES = (
     "Code",
@@ -176,6 +193,35 @@ def load_conf(asset_path: Path, explicit_conf: str | None) -> tuple[dict[str, An
         return json.loads(conf_path.read_text(encoding="utf-8")), str(conf_path)
     except Exception as exc:  # noqa: BLE001 - surfaced as a validation issue
         return {"__parse_error__": str(exc)}, str(conf_path)
+
+
+def normalize_asset_conf(conf: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Return the non-mutating editor-compatible view of an asset sidecar."""
+    if "__parse_error__" in conf:
+        return dict(conf), []
+
+    normalized = dict(conf)
+    defaulted: list[str] = []
+    for key, fallback in ASSET_CONF_DEFAULTS.items():
+        value = normalized.get(key)
+        valid = value is not None
+        if key == "uuid":
+            valid = type(value) is int and 0 <= value <= 0xFFFFFFFFFFFFFFFF
+        elif key in ASSET_CONF_BOOL_FIELDS:
+            valid = type(value) is bool
+        elif key in ASSET_CONF_SIGNED_FIELDS:
+            valid = type(value) is int and -0x80000000 <= value <= 0x7FFFFFFF
+        elif key in ASSET_CONF_UNSIGNED_FIELDS:
+            valid = type(value) is int and 0 <= value <= 0xFFFFFFFF
+        elif key == "fontCharset":
+            valid = isinstance(value, str)
+        elif key == "data":
+            valid = isinstance(value, dict)
+        if valid:
+            continue
+        normalized[key] = dict(fallback) if isinstance(fallback, dict) else fallback
+        defaulted.append(key)
+    return normalized, defaulted
 
 
 def read_png_info(path: Path) -> dict[str, Any]:
@@ -533,15 +579,15 @@ def collect_object_stats(graph: Any, max_component_id: int) -> tuple[dict[str, A
                         )
                     )
                 numeric = {
-                    key: data.get(key)
-                    for key in ("volume", "minDistance", "maxDistance", "rolloff")
+                    key: data.get(key, 1.0) if key == "pitch" else data.get(key)
+                    for key in ("volume", "minDistance", "maxDistance", "rolloff", "pitch")
                 }
                 if any(not isinstance(value, (int, float)) or isinstance(value, bool) for value in numeric.values()):
                     issues.append(
                         issue(
                             "error",
                             "SCENE_AUDIO3D_RANGE",
-                            f"{path} object '{name}' Audio (3D) volume/distances/rolloff must be numeric.",
+                            f"{path} object '{name}' Audio (3D) volume/distances/rolloff/pitch must be numeric.",
                         )
                     )
                 else:
@@ -553,6 +599,8 @@ def collect_object_stats(graph: Any, max_component_id: int) -> tuple[dict[str, A
                         issues.append(issue("error", "SCENE_AUDIO3D_RANGE", "Audio (3D) maxDistance must exceed minDistance."))
                     if float(numeric["rolloff"]) <= 0.0:
                         issues.append(issue("error", "SCENE_AUDIO3D_RANGE", "Audio (3D) rolloff must be positive."))
+                    if not 0.125 <= float(numeric["pitch"]) <= 8.0:
+                        issues.append(issue("error", "SCENE_AUDIO3D_RANGE", "Audio (3D) pitch must be in 0.125..8."))
         if rigid_body_count > 1:
             issues.append(
                 issue(
@@ -1817,7 +1865,7 @@ def asset_entry(
     parse_issue = conf_parse_issue(conf, conf_path)
     conf_exists = conf_path is not None
     conf_ok = parse_issue is None
-    safe_conf = conf if conf_ok else {}
+    safe_conf, conf_defaulted_fields = normalize_asset_conf(conf if conf_ok else {})
     try:
         size_bytes = path.stat().st_size
     except OSError:
@@ -1849,6 +1897,7 @@ def asset_entry(
         "conf_path": conf_path or str(asset_conf_path(path)),
         "conf_exists": conf_exists,
         "conf_ok": conf_ok,
+        "conf_defaulted_fields": conf_defaulted_fields,
         "sidecar_excluded": sidecar_excluded,
         "project_excluded": project_excluded,
         "matched_exclusion_patterns": matched_patterns,
@@ -3330,19 +3379,38 @@ def run_command_artifacts(rom_path: Path) -> list[dict[str, Any]]:
     return [artifact_entry(rom_path, "rom")]
 
 
-def prepare_emulator_argv(emulator_argv: list[str], project_root: Path, rom_path: Path) -> list[str]:
+def prepare_emulator_argv(
+    emulator_argv: list[str],
+    project_root: Path,
+    rom_path: Path,
+    *,
+    homebrew_mode: bool = False,
+    emulator_version_text: str = "",
+) -> list[str]:
     argv = list(emulator_argv)
-    if "dev.ares.ares" in argv:
+    resolved_project_root = project_root.expanduser().resolve()
+    resolved_rom_path = rom_path.expanduser().resolve()
+    is_flatpak_ares = "dev.ares.ares" in argv
+    executable_name = Path(argv[0]).name.lower() if argv else ""
+    is_ares = is_flatpak_ares or executable_name in {"ares", "ares.exe"}
+    if is_flatpak_ares:
         app_index = argv.index("dev.ares.ares")
         if not any(part.startswith("--filesystem=") for part in argv[:app_index]):
-            argv.insert(app_index, f"--filesystem={project_root}")
+            argv.insert(app_index, f"--filesystem={resolved_project_root}")
             app_index += 1
         app_args = argv[app_index + 1 :]
         if "--system" not in app_args:
             argv.extend(["--system", "Nintendo 64"])
         if "--no-file-prompt" not in app_args:
             argv.append("--no-file-prompt")
-    argv.append(str(rom_path))
+    if homebrew_mode and is_ares and not any("HomebrewMode=" in part for part in argv):
+        match = re.search(r"\bv(\d+)\b", emulator_version_text, re.IGNORECASE)
+        version = int(match.group(1)) if match else 148
+        # Ares v148 and earlier expose this as General/HomebrewMode. The
+        # post-v148 settings reorganization moved it under Developer.
+        setting = "General/HomebrewMode=true" if version <= 148 else "Developer/HomebrewMode=true"
+        argv.extend(["--setting", setting])
+    argv.append(str(resolved_rom_path))
     return argv
 
 
@@ -3630,10 +3698,16 @@ def execute_run(args: argparse.Namespace) -> dict[str, Any]:
         return result
 
     project_root = Path(str((result.get("project") or {}).get("path", rom_path.parent)))
-    argv = prepare_emulator_argv(emulator_argv or [], project_root, rom_path)
+    version_text = emulator_version(emulator_argv or []) if profile_requested else None
+    argv = prepare_emulator_argv(
+        emulator_argv or [],
+        project_root,
+        rom_path,
+        homebrew_mode=profile_requested,
+        emulator_version_text=version_text or "",
+    )
     result["run"]["emulator"] = emulator_spec
     result["run"]["argv"] = argv
-    version_text = emulator_version(emulator_argv or []) if profile_requested else None
     if profile_requested:
         result["profile"]["emulator_version"] = version_text
     started_at = time.perf_counter()
@@ -3891,8 +3965,14 @@ def validate_project_asset_entry(
             "metadata": {"conf": conf_path, "skipped": False},
             "issues": [parse_issue],
         }
+    conf, defaulted_fields = normalize_asset_conf(conf)
+
+    def with_conf_defaults(result: dict[str, Any]) -> dict[str, Any]:
+        result.setdefault("metadata", {})["conf_defaulted_fields"] = defaulted_fields
+        return result
+
     if kind not in VALIDATABLE_ASSET_KINDS:
-        return {
+        return with_conf_defaults({
             "ok": True,
             "path": str(path),
             "kind": kind,
@@ -3902,28 +3982,28 @@ def validate_project_asset_entry(
                 "skip_reason": "No read-only validator exists for this project asset kind yet.",
             },
             "issues": [],
-        }
+        })
 
     validate_args = validator_args_from_asset_command(args)
     if kind == "texture":
-        return validate_texture(path, conf, conf_path, validate_args, limits)
+        return with_conf_defaults(validate_texture(path, conf, conf_path, validate_args, limits))
     if kind == "model":
-        return validate_model(path, conf, conf_path, validate_args, limits)
+        return with_conf_defaults(validate_model(path, conf, conf_path, validate_args, limits))
     if kind == "audio":
-        return validate_audio(path, conf, conf_path, validate_args, limits)
+        return with_conf_defaults(validate_audio(path, conf, conf_path, validate_args, limits))
     if kind == "font":
-        return validate_font(path, conf_path)
+        return with_conf_defaults(validate_font(path, conf_path))
     if kind == "ui":
-        return validate_ui_document(path)
+        return with_conf_defaults(validate_ui_document(path))
     if kind == "prefab":
-        return validate_prefab_file(path, limits, conf, conf_path)
+        return with_conf_defaults(validate_prefab_file(path, limits, conf, conf_path))
     if kind == "node_graph":
         project_root = path.parent
         for parent in path.parents:
             if (parent / PROJECT_FILENAME).is_file():
                 project_root = parent
                 break
-        return validate_node_graph_file(path, project_root, conf_path)
+        return with_conf_defaults(validate_node_graph_file(path, project_root, conf_path))
     raise AssertionError(f"unhandled asset kind: {kind}")
 
 
@@ -4255,6 +4335,7 @@ def cmd_asset_show(args: argparse.Namespace) -> int:
 
     entry = asset_entry(project_root, path)
     conf, _conf_path = load_conf(path, None)
+    conf, _defaulted_fields = normalize_asset_conf(conf)
     validation = validate_project_asset_entry(entry, limits, args)
     issues.extend(validation.get("issues", []))
     result = {
@@ -4747,11 +4828,13 @@ def cmd_import(args: argparse.Namespace) -> int:
     return exit_code
 
 
-def doctor_emulator_status() -> tuple[bool, str]:
+def doctor_emulator_status() -> tuple[bool, str, str]:
     found = {name: shutil.which(name) for name in ("ares", "gopher64")}
     direct = [f"{name}={path}" for name, path in found.items() if path]
     if direct:
-        return True, ", ".join(direct)
+        selected = found.get("ares") or found.get("gopher64")
+        version = emulator_version([str(selected)]) if selected else "unknown"
+        return True, f"{', '.join(direct)} ({version})", version
 
     flatpak = shutil.which("flatpak")
     if flatpak:
@@ -4767,8 +4850,9 @@ def doctor_emulator_status() -> tuple[bool, str]:
         except (OSError, subprocess.TimeoutExpired):
             check = None
         if check is not None and check.returncode == 0:
-            return True, f"Ares Flatpak: {flatpak} run dev.ares.ares"
-    return False, "ares and gopher64 are not on PATH; Ares Flatpak is not installed"
+            version = emulator_version([flatpak, "run", "dev.ares.ares"])
+            return True, f"Ares Flatpak: {flatpak} run dev.ares.ares ({version})", version
+    return False, "ares and gopher64 are not on PATH; Ares Flatpak is not installed", "unknown"
 
 
 def build_doctor_result(
@@ -4814,7 +4898,7 @@ def build_doctor_result(
             "Run `bf64 toolchain install`, then `bf64 doctor --fix --project <project>`.",
         )
 
-    emulator_ok, emulator_detail = doctor_emulator_status()
+    emulator_ok, emulator_detail, emulator_version_text = doctor_emulator_status()
     add_check(
         "emulator",
         emulator_ok,
@@ -4833,6 +4917,11 @@ def build_doctor_result(
         "command": "doctor",
         "metadata": {"repo_root": str(REPO_ROOT), "strict": strict},
         "toolchain": toolchain,
+        "emulator": {
+            "available": emulator_ok,
+            "detail": emulator_detail,
+            "version": emulator_version_text,
+        },
         "checks": checks,
         "issues": issues,
     }
@@ -5475,6 +5564,7 @@ def default_component_data(component_id: int, scene_doc: dict[str, Any]) -> dict
             "minDistance": 50.0,
             "maxDistance": 1000.0,
             "rolloff": 1.0,
+            "pitch": 1.0,
         },
     }
     return json.loads(json.dumps(defaults[component_id]))
@@ -5565,6 +5655,15 @@ def resolve_component_asset(
                 "error",
                 "SCENE_COMPONENT_ASSET",
                 f"{COMPONENT_NAMES[component_id]} requires a {expected_kind} asset; got {entry.get('kind')}.",
+            )
+        )
+    if component_id == COMPONENT_ALIASES["audio3d"] and path.suffix.lower() == ".xm":
+        issues.append(
+            issue(
+                "error",
+                "SCENE_COMPONENT_ASSET",
+                "Audio (3D) requires a WAV/MP3 waveform asset; XM music is 2D-only.",
+                "Attach XM music to Audio (2D), or select a WAV/MP3 asset for positional playback.",
             )
         )
     asset_uuid = optional_int(entry.get("uuid"))

@@ -3,6 +3,7 @@
 * @license MIT
 */
 #include "audio/audioManager.h"
+#include "assets/assetTypes.h"
 #include "lib/logger.h"
 #include "audioManagerPrivate.h"
 #include "scene/camera.h"
@@ -248,6 +249,19 @@ namespace P64::AudioManager
     return Audio::Handle{(uint16_t)slot, nextUUID};
   }
 
+  Audio::Handle play2D(uint32_t assetId)
+  {
+    const uint8_t type = AssetManager::getTypeByIndex(assetId);
+    if(type == Assets::Type::AUDIO) {
+      return play2D(static_cast<wav64_t*>(AssetManager::getByIndex(assetId)));
+    }
+    if(type == Assets::Type::MUSIC_XM) {
+      return play2D(static_cast<xm64player_t*>(AssetManager::getByIndex(assetId)));
+    }
+    Log::warn("Asset %lu is not WAV64 or XM64 audio", assetId);
+    return {};
+  }
+
   Audio::Handle play3D(
     wav64_t *audio,
     const fm_vec3_t &position,
@@ -259,6 +273,19 @@ namespace P64::AudioManager
     handle.setSpatialSettings(settings);
     handle.setSpatial(true);
     return handle;
+  }
+
+  Audio::Handle play3D(
+    uint32_t assetId,
+    const fm_vec3_t &position,
+    const Audio::Spatial::Settings &settings
+  )
+  {
+    if(AssetManager::getTypeByIndex(assetId) != Assets::Type::AUDIO) {
+      Log::warn("Asset %lu is not positional WAV64 audio", assetId);
+      return {};
+    }
+    return play3D(static_cast<wav64_t*>(AssetManager::getByIndex(assetId)), position, settings);
   }
 
   void stopAll() {
@@ -283,10 +310,10 @@ void P64::Audio::Handle::stop() {
   if(entry->isXM()) {
     auto *player = entry->audioXM;
     auto chCount = xm64player_num_channels(entry->audioXM);
+    xm64player_stop(player);
     for(int s=slot; s < slot + chCount; ++s) {
       slots[s].clear();
     }
-    xm64player_stop(player);
     uuid = 0;
     return;
   }
@@ -309,18 +336,25 @@ void P64::Audio::Handle::setVolume(float volume)
 
 void P64::Audio::Handle::setSpeed(float speed)
 {
+  setPitch(speed);
+}
+
+void P64::Audio::Handle::setPitch(float ratio)
+{
   auto entry = getHandleSlot(slot, uuid);
   if(entry == nullptr)return;
 
   if(entry->isXM())
   {
-    Log::warn("setSpeed is not supported for XM audio! uuid: %d", uuid);
+    Log::warn("setPitch is not supported for XM audio! uuid: %d", uuid);
     return;
   }
 
+  if(!(ratio >= 0.125f))ratio = 0.125f;
+  if(ratio > 8.0f)ratio = 8.0f;
   for(uint32_t channel = slot; channel < groupEnd(slot); ++channel) {
-    slots[channel].speed = speed;
-    const float freq = slots[channel].audioWAV->wave.frequency * speed;
+    slots[channel].speed = ratio;
+    const float freq = slots[channel].audioWAV->wave.frequency * ratio;
     mixer_ch_set_freq(static_cast<int>(channel), freq);
   }
 }

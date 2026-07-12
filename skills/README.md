@@ -45,7 +45,7 @@ The package follows the `bevy-skills` shape: one router skill, narrow sibling sk
 
 These skills are pinned to the current BF64 agentic surface and the reviewed N64 reference docs:
 
-- BF64 CLI surface: `tools/bf64.py`, `CLI_VERSION = "0.17.0"`
+- BF64 CLI surface: `tools/bf64.py`, `CLI_VERSION = "0.18.0"`
 - N64 limits schema: `docs/docs/n64/limits.json`, `schema_version = 1`
 - tiny3d source pin: `bdcd946`
 - libdragon source pin: `b1011fe31`

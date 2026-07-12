@@ -199,7 +199,7 @@ Every scene mutation supports `--dry-run`, `--json`, and `--record`, validates t
 
 `focus list` reads the shared focus-area catalog used by the editor's **Focus** menu and the CLI. UI has a purpose-built document editor. Music, SFX, 3D Environment, 3D Avatars, and Cutscenes have dedicated tagged-asset workspaces plus matching `ls/validate/tag` namespaces. Membership is a multi-value `focusAreas` list in normal asset sidecars, so one asset can participate in several production slices.
 
-`ui new/ls/show/validate` provide document-oriented authoring and comprehensive validation for versioned `.bfui` assets. Containers, images, text, buttons, controller text input, and progress/value bars share the same GUI, CLI validator, `.ui64` builder, and N64 runtime contract. The native editor build remains the source of compiled `.ui64` ROM assets.
+`ui new/ls/show/validate` provide document-oriented authoring and comprehensive validation for versioned `.bfui` assets. Containers, images, text, buttons, controller text input, progress/value bars, and simple horizontal/vertical container flow share the same GUI, CLI validator, `.ui64` builder, and N64 runtime contract. Hidden flow children collapse and reflow visible siblings. The native editor build remains the source of compiled `.ui64` ROM assets.
 
 `prefab ls/show/validate/create/duplicate/rename/delete`, `prefab object`, `prefab component`, and `prefab attach` provide the same stable-UUID, atomic, dry-run/recordable mutation discipline as scenes. Prefab/sidecar pair operations validate before commit and roll both paths back on failure.
 
@@ -215,11 +215,11 @@ Every scene mutation supports `--dry-run`, `--json`, and `--record`, validates t
 
 `run` locates the expected `<romName>.z64`, uses project `pathEmu` by default, accepts `--emulator <command>` overrides, appends the ROM path to the emulator argv, and captures stdout/stderr tails, return code, duration, and ROM artifact metadata. `run --build` executes `build --execute` first, then launches the ROM if the build succeeds.
 
-`run --build --profile` embeds a bounded warm-up/sample request, consumes the runtime `BF64_PROFILE_JSON:` record, terminates the emulator after capture, and atomically writes a `bf64.profile` v1 artifact. It combines frame-time/FPS percentiles, model triangle/draw/material counters, peak RDRAM allocation footprint, audio voices, ROM/DFS/ELF sizes, BF64 target revision, and emulator version. Installed Ares Flatpaks are discovered automatically when no `ares` executable is on `PATH`.
+`run --build --profile` embeds a bounded warm-up/sample request, consumes the runtime `BF64_PROFILE_JSON:` record, terminates the emulator after capture, and atomically writes a `bf64.profile` v1 artifact. It combines frame-time/FPS percentiles, model triangle/draw/material counters, peak RDRAM allocation footprint, audio voices, ROM/DFS/ELF sizes, BF64 target revision, and emulator version. Installed Ares Flatpaks are discovered automatically when no `ares` executable is on `PATH`; profiling enables the version-appropriate Ares homebrew debug setting so ISViewer JSON reaches stdout.
 
 `toolchain detect/install` and `doctor --fix` provide the supported Linux setup path. Discovery has deterministic explicit/project/environment/default precedence. Install can bootstrap a missing cross-compiler, installs libdragon host/target tools and pinned Tiny3D without `sudo`, and supports a complete `--dry-run`. `doctor --fix` atomically persists `pathN64Inst` plus `.bf64/env.sh` and rolls both back if final validation fails.
 
-The runtime shippability surface now includes redundant checksummed EEPROM 4K/16K save slots (`save/saveManager.h`), listener-relative `Audio3D` playback/component id 14, and the input-agnostic `UI::DialogueRunner` typewriter/line sequencer. These are C++ engine APIs rather than new CLI data formats; their project guides define the stable contracts and Ares verification path.
+The runtime shippability surface now includes redundant checksummed EEPROM 4K/16K and FlashRAM save slots (`save/saveManager.h`), listener-relative `Audio3D` playback/component id 14 with WAV pitch control, the input-agnostic `UI::DialogueRunner` typewriter/line sequencer, and triple-buffered procedural chunk meshes with dirty-copy/culling telemetry. These are C++ engine APIs rather than new CLI data formats; their project guides define the stable contracts and Ares verification path.
 
 Known limits:
 

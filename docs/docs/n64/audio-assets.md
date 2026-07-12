@@ -364,7 +364,7 @@ An XM with >32 channels, or insufficient free channels, aborts.
 - `xm64player_play(player, first_ch)` (`xm64.h:116`) grabs N consecutive mixer channels.
 - Tempo/BPM from module.
 - Seeking is "broken by design" — moves cursor but doesn't reconstruct active samples/effects (`xm64.h:142-153`).
-- `setSpeed` (per-waveform pitch) is **NOT supported for XM** — BF64 explicitly warns (`audioManager.cpp:218-222`).
+- `setPitch` / its `setSpeed` compatibility alias are **not supported for XM**; WAV ratios are clamped to `0.125x..8x` and applied to every occupied mixer channel.
 
 ---
 
