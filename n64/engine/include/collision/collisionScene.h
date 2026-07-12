@@ -112,6 +112,7 @@ namespace P64::Coll {
      * @param collTypes       Which collider types to test against
      * @param readMask        Collision read mask (@TODO: not implemented)
      * @param hit             Output contact result
+     * @param ignoreOwner     Optional object whose colliders should be ignored
      * @return true if any contact was found
      */
     bool capsuleSweep(

@@ -185,7 +185,6 @@ namespace P64
        * whereas iterators or std::view performs worse.
        * Template params are deduced automatically.
        *
-       * @param parentId object id of the parent
        * @param f callback function, takes Object* as argument
        */
       template<typename F, typename SCENE = Scene>

@@ -33,7 +33,16 @@ if not _fast:
     extensions += ['breathe']
 
 templates_path = ['_templates']
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store', '.venv']
+exclude_patterns = [
+    '_build', 'Thumbs.db', '.DS_Store', '.venv',
+    # Repository-facing helper/redirect pages; the site uses index.rst and
+    # docs/faq.md instead.
+    'README.md', 'faq.md',
+]
+
+# Give Markdown headings stable targets so ordinary same-page links such as
+# ``[Pins](#pins)`` resolve through Sphinx instead of becoming missing xrefs.
+myst_heading_anchors = 3
 
 # Exhale gives nested classes both their own page and an inline declaration on the
 # parent's page; the strict C++ domain flags that as a duplicate. It's harmless

@@ -22,7 +22,7 @@ namespace P64::SceneManager
    *
    * This function does nothing if the provided ID is the current scene.
    * If you want to force-reload the current scene, use reload() instead.
-   * @param sceneId scene to load
+   * @param newSceneId scene to load
    */
   void load(uint16_t newSceneId);
 

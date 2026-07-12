@@ -62,7 +62,7 @@ Project
   └── project.p64proj
 
 Meaning of each directory
-^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 | ``assets`` contains things like textures, models, and audio files.
 | Those are later build into optimized binary files for runtime use.
@@ -80,7 +80,7 @@ Meaning of each directory
 | all .cpp files are automatically picked up (even nested in sub-dirs) and compiled into the game.
 
 Temporary build files
-^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^
 
 After a first build, you will also see additional files:
 
@@ -104,7 +104,7 @@ After a first build, you will also see additional files:
 | The ``.z64`` file is the final ROM, the only file out of these you will have to interact with.
 
 Version Control
-^^^^^^^^^
+^^^^^^^^^^^^^^^
 
 | It is highly recommended to use version control for your project!
 | Sooner or later you **will** lose work otherwise by accident.

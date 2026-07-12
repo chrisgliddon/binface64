@@ -91,11 +91,9 @@ namespace P64::Coll {
   }
 
   /// @brief Determines if a Ray intersects an AABB
-  /// @param box 
-  /// @param origin 
-  /// @param invDir 
-  /// @param maxDist 
-  /// @return 
+  /// @param box AABB to test
+  /// @param ray Ray origin, inverse direction, and maximum distance
+  /// @return true if the ray intersects the box within its maximum distance
   inline bool aabbIntersectsRay(const AABB &box, const Raycast &ray)
   {
 

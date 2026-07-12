@@ -28,6 +28,7 @@ namespace P64::Coll {
    * @param displacement   World-space displacement vector (not normalized)
    * @param v0/v1/v2       World-space triangle vertices
    * @param triNormal      World-space outward triangle normal (should be normalized)
+   * @param hit            Output contact result
    */
   bool capsuleSweepTriangle(
     const fm_vec3_t& center,

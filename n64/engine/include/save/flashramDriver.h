@@ -18,12 +18,11 @@
 
 /**
  * @defgroup flashram FlashRAM
- * @ingroup peripherals
  * @brief FlashRAM save storage for N64 cartridges
  *
  * This module provides access to the FlashRAM save chip found in some N64
  * cartridges (a 1 Mibit / 128 KiB Macronix- or Matsushita-family NOR flash).
- * Unlike SRAM, which is a flat, byte-addressable memory (see @ref sram.h),
+ * Unlike SRAM, which is a flat, byte-addressable memory (see `sram.h`),
  * FlashRAM is driven through a small command state machine on the PI bus and can
  * only be erased in 16 KiB sectors and programmed in 128-byte pages.
  *

@@ -60,7 +60,7 @@ namespace P64
       /**
        * Sets a new camera by position and rotation.
        * If you have a look-at based camera prefer using 'setLookAt'.
-       * @param pos camera eye
+       * @param newPos camera eye
        * @param rot rotation
        */
       void setPosRot(const fm_vec3_t &newPos, const fm_quat_t &rot);

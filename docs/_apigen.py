@@ -74,6 +74,11 @@ class _Gen:
                 name = m.findtext("name") or ""
                 if not name:
                     continue
+                # GCC attributes on packed C-style structs can be represented by
+                # Doxygen as a synthetic ``__attribute__((packed))`` function.
+                # It is syntax attached to a declaration, not a callable API.
+                if kind == "function" and name == "__attribute__":
+                    continue
                 qual = "{0}::{1}".format(nsname, name)
                 if kind == "function":
                     types = [_xml_text(p.find("type")) for p in m.findall("param")]
@@ -106,7 +111,12 @@ class _Gen:
         kind, name = self.compounds[refid]
         cdef = self._parse(refid)
         title = "{0} {1}".format(kind.capitalize(), name.split("::")[-1])
-        parts = [".. _{0}:\n".format(refid), _heading(title, "="), ""]
+        # Breathe publishes Doxygen's refid as a target for global C typedef
+        # structs while expanding the directive. Keep just those page labels in
+        # a separate namespace so the targets do not collide; preserve existing
+        # refid labels for namespaced C++ types.
+        label = refid if "::" in name else "api-{0}".format(refid)
+        parts = [".. _{0}:\n".format(label), _heading(title, "="), ""]
 
         brief = _xml_text(cdef.find("briefdescription")) if cdef is not None else ""
         if brief:

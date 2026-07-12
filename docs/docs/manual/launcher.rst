@@ -8,7 +8,7 @@ Launcher
 	:width: 500
 
 Creating a new Project
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 | This lets you create a new project,
 | which is a directory of a self-contained game the editor lets you work on.
@@ -23,7 +23,7 @@ Creating a new Project
   Due to technical issues with MSYS2/Makefiles, spaces in project paths are not allowed.
 
 Opening a Project
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
 
 | Each projects directory includes a ``.p64proj`` file that holds the project settings.
 | To open an existing project, click on "Open Project" and select the ``.p64proj`` file.

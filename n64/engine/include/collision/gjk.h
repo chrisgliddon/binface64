@@ -46,6 +46,7 @@ namespace P64::Coll {
   /// @param colliderB second collider
   /// @param colliderBSupport support function matching the second collider type
   /// @param firstDirection initial direction to search for the origin (arbitrary)
+  /// @param outSeparatingAxis optional output separating axis when no overlap is found
   /// @return 
   bool gjkCheckForOverlap(
     Simplex &simplex,

@@ -24,7 +24,7 @@ Overview
 | and a few special ones for things like menus or credit scenes.
 
 Scene-Graph & Objects
-----------------
+---------------------
 
 | Now lets take a look at how a single scene is set up.
 | Besides some generic settings like framebuffer setup and meta-data,
