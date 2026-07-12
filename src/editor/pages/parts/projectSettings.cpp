@@ -10,6 +10,7 @@
 #include "../../../context.h"
 #include "../../../utils/logger.h"
 #include "../../../project/romMeta.h"
+#include "../../../project/assetExclusions.h"
 #include "misc/cpp/imgui_stdlib.h"
 #include "../../imgui/helper.h"
 #include "IconsMaterialDesignIcons.h"
@@ -181,6 +182,41 @@ namespace
     }
     return false;
   }
+
+  bool assetExclusionsHaveError()
+  {
+    for(const auto &pattern : ctx.project->conf.assetExclusions) {
+      if(!Project::AssetExclusions::normalize(pattern))return true;
+    }
+    return false;
+  }
+
+  void drawAssetExclusions()
+  {
+    ImGui::TextWrapped(
+      "Skip matching files during validation and ROM builds. Patterns are relative to assets/: "
+      "* matches within one directory, ** crosses directories, and basename-only patterns match anywhere."
+    );
+
+    auto &patterns = ctx.project->conf.assetExclusions;
+    int removeIndex = -1;
+    for(size_t i = 0; i < patterns.size(); ++i) {
+      ImGui::PushID(static_cast<int>(i));
+      ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 34_px);
+      ImGui::InputText("##pattern", &patterns[i]);
+      ImGui::SameLine();
+      if(ImGui::Button(ICON_MDI_DELETE))removeIndex = static_cast<int>(i);
+      if(!Project::AssetExclusions::normalize(patterns[i])) {
+        ImGui::TextColored(
+          {1.0f, 0.3f, 0.3f, 1.0f},
+          ICON_MDI_ALERT " Use a non-empty relative path without empty, '.' or '..' segments"
+        );
+      }
+      ImGui::PopID();
+    }
+    if(removeIndex >= 0)patterns.erase(patterns.begin() + removeIndex);
+    if(ImGui::Button(ICON_MDI_PLUS " Add Exclusion"))patterns.emplace_back("reference/**");
+  }
 }
 
 bool Editor::ProjectSettings::draw()
@@ -213,6 +249,10 @@ bool Editor::ProjectSettings::draw()
     ImTable::end();
   }
 
+  if (ImGui::CollapsingHeader("Asset Exclusions")) {
+    drawAssetExclusions();
+  }
+
   if (ImGui::CollapsingHeader("ROM Header")) {
     drawRomHeader();
   }
@@ -230,11 +270,16 @@ bool Editor::ProjectSettings::draw()
 
   ImGui::EndChild();
 
-  bool hasError = metadataHasError();
+  bool metadataError = metadataHasError();
+  bool exclusionError = assetExclusionsHaveError();
+  bool hasError = metadataError || exclusionError;
 
   ImGui::BeginChild("BOTTOM", ImVec2(0, 24_px));
     if(hasError) {
-      ImGui::TextColored({1.0f, 0.3f, 0.3f, 1.0f}, ICON_MDI_ALERT " Fix invalid metadata images before saving");
+      const char *message = exclusionError
+        ? "Fix invalid asset exclusion patterns before saving"
+        : "Fix invalid metadata images before saving";
+      ImGui::TextColored({1.0f, 0.3f, 0.3f, 1.0f}, ICON_MDI_ALERT " %s", message);
       ImGui::SameLine();
     }
     ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 64_px);
@@ -246,6 +291,8 @@ bool Editor::ProjectSettings::draw()
 
   if (res) {
     ctx.project->save();
+    // Project-level patterns affect every entry's effective exclusion state.
+    ctx.project->getAssets().reload();
   }
   return res;
 }

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed": "2026-07-09",
+  "reviewed": "2026-07-11",
   "description": "Machine-readable BF64/N64 asset limits derived from docs/docs/n64/*.md. Human-facing rationale stays in the Markdown docs; tools should query this file for exact numbers.",
   "sources": {
     "texture_formats": "docs/docs/n64/textures.md",
@@ -14,6 +14,14 @@
     "user_or_asset_error": 1,
     "environment_error": 2,
     "internal_error": 3
+  },
+  "engine": {
+    "max_component_id": 14,
+    "ui_document_version": 1,
+    "ui_max_elements": 256,
+    "ui_max_text_length": 256,
+    "ui_font_id_min": 1,
+    "ui_font_id_max": 15
   },
   "texture": {
     "accepted_extensions": [".png"],

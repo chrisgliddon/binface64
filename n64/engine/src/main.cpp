@@ -16,6 +16,7 @@
 #include "assets/assetManager.h"
 #include "libdragon/utils.h"
 #include "renderer/drawLayer.h"
+#include "debug/profiler.h"
 #include "script/globalScript.h"
 
 P64::GlobalState P64::state{};
@@ -32,6 +33,8 @@ namespace
     uint32_t sceneIdOnBoot{};
     uint32_t sceneIdOnReset{};
     std::array<uint16_t, 16> autoLoadFonts{}; // index=slot, value=asset-index
+    uint16_t profileWarmupFrames{};
+    uint16_t profileSampleFrames{};
   };
   constinit ProjectConf projectConf{};
 }
@@ -80,6 +83,8 @@ int main()
 	  projectConf = *tmp;
     free(tmp);
 	}
+
+  P64::Profiler::configure({projectConf.profileWarmupFrames, projectConf.profileSampleFrames});
 
   // auto-load fonts marked as such
   for(uint32_t fontIdx=0; fontIdx < projectConf.autoLoadFonts.size(); fontIdx++) {

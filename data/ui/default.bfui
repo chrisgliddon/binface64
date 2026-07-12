@@ -1,0 +1,24 @@
+{
+  "schema": "bf64.ui",
+  "version": 1,
+  "canvas": {
+    "width": 320,
+    "height": 240,
+    "safeArea": [8, 8, 8, 8],
+    "snap": 1
+  },
+  "root": {
+    "id": "root",
+    "type": "Container",
+    "layout": {
+      "anchors": [0.0, 0.0, 1.0, 1.0],
+      "offsets": [0, 0, 0, 0]
+    },
+    "visible": true,
+    "enabled": true,
+    "style": {
+      "color": "#00000000"
+    },
+    "children": []
+  }
+}

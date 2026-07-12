@@ -28,6 +28,7 @@ Use this when code will run on the N64 runtime, not only in the host editor.
 - Runtime code uses `gnu++20`, `-fno-exceptions`, `-Os`, and strict warnings.
 - Public runtime APIs live under `n64/engine/include/`.
 - `P64_DATA(...)` structs are parsed by BF64's script builder; keep data fields simple and serializable.
+- Use `save/saveManager.h` for EEPROM slots, `ui/dialogue.h` for typewriter sequencing, and `AudioManager::play3D`/Audio3D for positional WAV playback instead of game-local substitutes.
 
 ## Workflow
 
@@ -46,6 +47,7 @@ Use this when code will run on the N64 runtime, not only in the host editor.
 - `docs/docs/agent/ARCHITECTURE.md` sections 2 and 4.
 - `docs/docs/agent/CODEMAP.md` sections `n64/engine/include`, `src/build/scriptBuilder.cpp`, and runtime main loop.
 - `docs/docs/n64/libdragon-tiny3d.md`.
+- `docs/docs/project/save-data.md`, `dialogue.md`, and `audio3d.md` for the BF64 shippability APIs.
 
 ## Common Agent Mistakes
 

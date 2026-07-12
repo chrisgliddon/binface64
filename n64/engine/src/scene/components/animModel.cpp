@@ -10,6 +10,7 @@
 
 #include "../../renderer/bigtex/bigtex.h"
 #include "renderer/material.h"
+#include "debug/profiler.h"
 #include "scene/scene.h"
 #include "scene/sceneManager.h"
 
@@ -159,6 +160,7 @@ namespace P64::Comp
 
     t3d_skeleton_use(&data->skelMain);
     t3d_matrix_set(mat, true);
+    Profiler::recordModel(data->model);
     rspq_block_run(data->model->userBlock);
 
     data->material.end();

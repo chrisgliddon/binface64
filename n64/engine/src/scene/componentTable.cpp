@@ -19,6 +19,8 @@
 #include "scene/components/nodeGraph.h"
 #include "scene/components/animModel.h"
 #include "scene/components/charBody.h"
+#include "scene/components/ui.h"
+#include "scene/components/audio3d.h"
 
 // some template magic to auto-detect if a function exists in a component
 #define HAS_FUNC_TPL(NAME_HAS, NAME_GET, FUNC) \
@@ -36,6 +38,7 @@
 namespace
 {
   HAS_FUNC_TPL(has_draw,   get_draw,    draw   )
+  HAS_FUNC_TPL(has_draw2D, get_draw2D,  draw2D )
   HAS_FUNC_TPL(has_update, get_update,  update )
   HAS_FUNC_TPL(has_fixed_update, get_fixed_update, fixedUpdate)
   HAS_FUNC_TPL(has_event,  get_event,   onEvent)
@@ -48,6 +51,7 @@ namespace
     .update = (FuncUpdate)get_update<Comp::NAME>(), \
     .fixedUpdate = (FuncFixedUpdate)get_fixed_update<Comp::NAME>(), \
     .draw   = (FuncDraw)(get_draw<Comp::NAME>()), \
+    .draw2D = (FuncDraw2D)(get_draw2D<Comp::NAME>()), \
     .onEvent = (FuncOnEvent)(get_event<Comp::NAME>()), \
     .onColl = (FuncOnColl)(get_coll<Comp::NAME>()), \
     .getAllocSize = reinterpret_cast<FuncGetAllocSize>(Comp::NAME::getAllocSize), \
@@ -69,5 +73,7 @@ namespace P64
     SET_COMP(AnimModel),
     SET_COMP(RigidBody),
     SET_COMP(CharBody),
+    SET_COMP(UI),
+    SET_COMP(Audio3D),
   };
 }

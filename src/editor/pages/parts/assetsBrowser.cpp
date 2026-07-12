@@ -67,7 +67,7 @@ void Editor::AssetsBrowser::draw() {
     },
     TabDef{
       .name = ICON_MDI_FILE "  Assets",
-      .fileTypes = {FileType::IMAGE, FileType::AUDIO, FileType::MUSIC_XM, FileType::MODEL_3D, FileType::FONT}
+      .fileTypes = {FileType::IMAGE, FileType::AUDIO, FileType::MUSIC_XM, FileType::MODEL_3D, FileType::FONT, FileType::UI_DOCUMENT}
     },
     TabDef{
       .name = ICON_MDI_SCRIPT_OUTLINE "  Scripts",
@@ -441,6 +441,8 @@ void Editor::AssetsBrowser::draw() {
         iconTxt = ICON_MDI_LANGUAGE_CPP;
       } else if (asset.type == FileType::NODE_GRAPH) {
         iconTxt = ICON_MDI_GRAPH_OUTLINE;
+      } else if (asset.type == FileType::UI_DOCUMENT) {
+        iconTxt = ICON_MDI_MONITOR_DASHBOARD;
       }
     }
 
@@ -451,7 +453,7 @@ void Editor::AssetsBrowser::draw() {
       iconTxt,
       asset.name,
       isSelected,
-      asset.conf.exclude ? 0.25f : 1.0f,
+      asset.isExcluded() ? 0.25f : 1.0f,
       scrubUUID
     );
     bool isDblClick = ImGui::IsMouseDoubleClicked(0) && ImGui::IsItemHovered();
@@ -464,6 +466,8 @@ void Editor::AssetsBrowser::draw() {
       if (asset.type == FileType::NODE_GRAPH) {
         // Node graphs open in the built-in graph editor, not an external text editor.
         Editor::Actions::call(Editor::Actions::Type::OPEN_NODE_GRAPH, std::to_string(asset.getUUID()));
+      } else if (asset.type == FileType::UI_DOCUMENT) {
+        Editor::Actions::call(Editor::Actions::Type::OPEN_UI_DOCUMENT, std::to_string(asset.getUUID()));
       } else if (!Utils::Proc::openFile(asset.path)) {
         Editor::Noti::add(Editor::Noti::Type::ERROR, "Failed to open File. This may be due to WSL path conversion failure.");
       }

@@ -9,6 +9,7 @@
 #include "../../imgui/helper.h"
 #include "../../../context.h"
 #include "../../../utils/textureFormats.h"
+#include "../../../utils/json.h"
 #include "../../thumbnailCache.h"
 
 using FileType = Project::FileType;
@@ -111,7 +112,16 @@ void Editor::AssetInspector::draw() {
       }
     }
 
-    ImTable::addCheckBox("Exclude", asset->conf.exclude);
+    ImTable::addCheckBox("Sidecar Exclude", asset->conf.exclude);
+    if(!asset->matchedProjectExclusions.empty()) {
+      std::string patterns{};
+      for(const auto &pattern : asset->matchedProjectExclusions) {
+        if(!patterns.empty())patterns += ", ";
+        patterns += pattern;
+      }
+      ImTable::add("Project Exclusion");
+      ImGui::TextWrapped("%s", patterns.c_str());
+    }
 
     ImTable::end();
 
@@ -189,6 +199,19 @@ void Editor::AssetInspector::draw() {
 
       if(ImGui::Button(ICON_MDI_PENCIL " Open Model Editor")) {
         ctx.editorScene->openModelEditor(asset->getUUID());
+      }
+    }
+    if (asset->type == FileType::UI_DOCUMENT) {
+      try {
+        auto doc = Utils::JSON::loadFile(asset->path);
+        auto canvas = doc.value("canvas", nlohmann::json::object());
+        ImGui::Text("Canvas: %dx%d", canvas.value("width", 320), canvas.value("height", 240));
+        ImGui::TextUnformatted("Format: bf64.ui v1");
+      } catch(...) {
+        ImGui::TextColored({0.9f,0.3f,0.3f,1}, "Invalid UI document JSON");
+      }
+      if(ImGui::Button(ICON_MDI_PENCIL " Open UI Editor")) {
+        ctx.editorScene->openUIEditor(asset->getUUID());
       }
     }
   }

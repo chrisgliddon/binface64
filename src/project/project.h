@@ -68,6 +68,10 @@ namespace Project
     uint32_t sceneIdLastOpened{1};
     bool debugMenu{true};
 
+    // Assets-relative slash-aware globs. `*` stays within a path segment and
+    // `**` crosses directory boundaries (for example: reference/**).
+    std::vector<std::string> assetExclusions{};
+
     std::array<std::string, 8> collLayerNames{};
 
     std::string serialize() const;

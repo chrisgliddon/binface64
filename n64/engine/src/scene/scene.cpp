@@ -23,6 +23,7 @@
 #include "../audio/audioManagerPrivate.h"
 #include "../debug/overlay.h"
 #include "debug/debugMenu.h"
+#include "debug/profiler.h"
 
 #include "renderer/pipeline.h"
 #include "renderer/pipelineHDRBloom.h"
@@ -148,6 +149,7 @@ P64::Scene::~Scene()
 
 void P64::Scene::update(float deltaTime)
 {
+  Profiler::beginFrame(deltaTime);
   accumulator_ticks += TICKS_FROM_US((uint32_t)(deltaTime * 1000000.0f));
   joypad_poll();
 
@@ -272,6 +274,8 @@ void P64::Scene::update(float deltaTime)
     cam->update(deltaTime);
   }
 
+  if(!cameras.empty())AudioManager::setListener(*cameras[0]);
+
   ticksActorUpdate = get_ticks() - ticksActorUpdate;
 
   for(auto &obj : pendingObjDelete)
@@ -290,6 +294,7 @@ void P64::Scene::update(float deltaTime)
 
   AudioManager::update();
   VI::SwapChain::nextFrame();
+  Profiler::endFrame();
 }
 
 void P64::Scene::draw([[maybe_unused]] float deltaTime)
@@ -355,6 +360,20 @@ void P64::Scene::draw([[maybe_unused]] float deltaTime)
 
   auto t = get_user_ticks();
   DrawLayer::use2D();
+    for(auto obj : objects)
+    {
+      if(!obj->isEnabled() || !obj->isVisible())continue;
+      auto compRefs = obj->getCompRefs();
+      for(uint32_t i=0; i<obj->compCount; ++i)
+      {
+        const auto &compDef = COMP_TABLE[compRefs[i].type];
+        if(compDef.draw2D) {
+          char *dataPtr = reinterpret_cast<char*>(obj) + compRefs[i].offset;
+          compDef.draw2D(*obj, dataPtr, deltaTime);
+          DrawLayer::use2D();
+        }
+      }
+    }
     GlobalScript::callHooks(GlobalScript::HookType::SCENE_DRAW_2D);
   DrawLayer::useDefault();
   ticksGlobalDraw += get_user_ticks() - t;

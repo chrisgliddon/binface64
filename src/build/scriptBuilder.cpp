@@ -145,6 +145,7 @@ void Build::buildGlobalScripts(Project::Project &project, SceneCtx &sceneCtx)
   sceneCtx.needsOpus = false;
   for(auto &asset : project.getAssets().getTypeEntries(Project::FileType::AUDIO))
   {
+    if(asset.isExcluded())continue;
     if(asset.conf.wavCompression.value == 3) // Opus
     {
       sceneCtx.needsOpus = true;

@@ -34,7 +34,7 @@ bool Build::buildNodeGraphAssets(Project::Project &project, SceneCtx &sceneCtx)
   auto &assets = sceneCtx.project->getAssets().getTypeEntries(Project::FileType::NODE_GRAPH);
   for (auto &asset : assets)
   {
-    if(asset.conf.exclude)continue;
+    if(asset.isExcluded())continue;
 
     auto projectPath = fs::path{project.getPath()};
     auto outPath = projectPath / asset.outPath;

@@ -3,8 +3,12 @@
 * @license MIT
 */
 #pragma once
+#include <fgeom.h>
 #include <libdragon.h>
 #include "assets/assetManager.h"
+#include "audio/spatialAudio.h"
+
+namespace P64 { class Camera; }
 
 namespace P64::Audio
 {
@@ -37,6 +41,11 @@ namespace P64::Audio
       void stop();
       void setVolume(float volume);
       void setSpeed(float speed);
+      /** Move a positional sound without restarting playback. */
+      void setPosition(const fm_vec3_t &position);
+      void setSpatialSettings(const Spatial::Settings &settings);
+      /** Switch between listener-relative 3D mixing and normal centered 2D. */
+      void setSpatial(bool enabled);
       bool isDone();
   };
 }
@@ -53,9 +62,27 @@ namespace P64::AudioManager
 
   Audio::Handle play2D(wav64_t *audio);
   Audio::Handle play2D(xm64player_t *audio);
+  Audio::Handle play3D(
+    wav64_t *audio,
+    const fm_vec3_t &position,
+    const Audio::Spatial::Settings &settings = {}
+  );
+
+  /** Set the listener explicitly, normally once per frame. */
+  void setListener(const fm_vec3_t &position, const fm_vec3_t &forward, const fm_vec3_t &up = {0, 1, 0});
+  /** Convenience overload using a BF64 camera transform. */
+  void setListener(const Camera &camera);
 
   inline Audio::Handle play2D(uint32_t assetId) {
     return play2D((wav64_t*)AssetManager::getByIndex(assetId));
+  }
+
+  inline Audio::Handle play3D(
+    uint32_t assetId,
+    const fm_vec3_t &position,
+    const Audio::Spatial::Settings &settings = {}
+  ) {
+    return play3D((wav64_t*)AssetManager::getByIndex(assetId), position, settings);
   }
 
   void stopAll();

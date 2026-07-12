@@ -34,6 +34,8 @@ add_executable(n64_engine
         engine/src/scene/sceneManager.cpp
 
         engine/src/audio/audioManager.cpp
+        engine/include/audio/spatialAudio.h
+        engine/src/audio/spatialAudio.cpp
         engine/src/scene/sceneLoader.cpp
         engine/include/scene/object.h
         engine/include/scene/components/code.h
@@ -74,6 +76,8 @@ add_executable(n64_engine
         engine/src/renderer/bigtex/rspBigTex.cpp
         engine/include/scene/components/audio2d.h
         engine/src/scene/components/audio2d.cpp
+        engine/include/scene/components/audio3d.h
+        engine/src/scene/components/audio3d.cpp
         engine/src/scene/components/collBody.cpp
         engine/src/scene/components/rigidBody.cpp
         engine/src/renderer/hdr/rspHDR.cpp
@@ -97,6 +101,13 @@ add_executable(n64_engine
         engine/src/script/nodeGraph.cpp
         engine/src/renderer/material.cpp
         engine/src/scene/components/animModel.cpp
+        engine/include/scene/components/ui.h
+        engine/include/ui/documentFormat.h
+        engine/include/ui/dialogue.h
+        engine/include/ui/utf8.h
+        engine/src/ui/dialogue.cpp
+        engine/src/ui/utf8.cpp
+        engine/src/scene/components/ui.cpp
         engine/src/lib/matrixManager.cpp
         engine/src/renderer/hdr/postProcess.cpp
         engine/src/debug/debugText.cpp
@@ -105,5 +116,7 @@ add_executable(n64_engine
         engine/src/debug/overlay/ovlCPU.cpp
         engine/src/debug/overlay/ovlColors.h
         engine/include/debug/debugMenu.h
+        engine/include/save/saveManager.h
+        engine/src/save/saveManager.cpp
         engine/src/collision/characterBody.cpp
 )

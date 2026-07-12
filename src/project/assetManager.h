@@ -14,21 +14,13 @@
 #include "../utils/codeParser.h"
 #include "../renderer/texture.h"
 #include "assets/model3d.h"
+#include "assetConf.h"
 #include "scene/prefab.h"
 #include "tiny3d/tools/gltf_importer/src/structs.h"
 
 namespace Project
 {
   class Project;
-
-  enum class ComprTypes : int
-  {
-    DEFAULT = 0,
-    LEVEL_0,
-    LEVEL_1,
-    LEVEL_2,
-    LEVEL_3,
-  };
 
   enum class FileType : int
   {
@@ -42,31 +34,9 @@ namespace Project
     PREFAB,
     NODE_GRAPH,
     MUSIC_XM,
+    UI_DOCUMENT,
 
     _SIZE
-  };
-
-  struct AssetConf
-  {
-    uint64_t uuid{0};
-    int format{0};
-    int baseScale{0};
-    bool gltfBVH{0};
-
-    ComprTypes compression{ComprTypes::DEFAULT};
-    bool exclude{false};
-
-    PROP_BOOL(wavForceMono);
-    PROP_U32(wavResampleRate);
-    PROP_S32(wavCompression);
-
-    PROP_U32(fontId);
-    PROP_STRING(fontCharset);
-
-    // extra arbitrary data assets can store
-    nlohmann::json data{};
-
-    std::string serialize() const;
   };
 
   struct AssetManagerEntry
@@ -82,8 +52,12 @@ namespace Project
     std::shared_ptr<Prefab> prefab{nullptr};
     AssetConf conf{};
     Utils::CPP::Struct params{};
+    std::vector<std::string> matchedProjectExclusions{};
 
     uint64_t getUUID() const { return conf.uuid; }
+    [[nodiscard]] bool isExcluded() const {
+      return conf.exclude || !matchedProjectExclusions.empty();
+    }
 
     // imgui selectbox:
     uint64_t getId() const { return conf.uuid; }
@@ -180,5 +154,6 @@ namespace Project
 
       bool createScript(const std::string &name, bool isGlobal, const std::string &subDir = {});
       uint64_t createNodeGraph(const std::string &name);
+      uint64_t createUIDocument(const std::string &name, uint16_t width = 320, uint16_t height = 240);
   };
 }

@@ -19,7 +19,8 @@ namespace Editor::Actions
     ASSETS_RELOAD,
     COPY, PASTE,
 
-    OPEN_NODE_GRAPH
+    OPEN_NODE_GRAPH,
+    OPEN_UI_DOCUMENT
   };
 
   using ActionFn = std::function<bool(const std::string&)>;

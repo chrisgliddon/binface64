@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "areas": [
+    {
+      "id": "ui",
+      "label": "UI",
+      "icon": "monitor-dashboard",
+      "assetKinds": ["ui", "texture", "font"],
+      "workspace": "ui",
+      "cliNamespace": "ui",
+      "description": "Author controller-first 2D documents, images, text, inputs, buttons, and HUD values.",
+      "status": "available"
+    },
+    {
+      "id": "music",
+      "label": "Music",
+      "icon": "music",
+      "assetKinds": ["audio"],
+      "workspace": "music",
+      "cliNamespace": "music",
+      "description": "Organize and validate songs, tracker modules, streamed tracks, and music budgets.",
+      "status": "available"
+    },
+    {
+      "id": "sfx",
+      "label": "SFX",
+      "icon": "volume-high",
+      "assetKinds": ["audio"],
+      "workspace": "sfx",
+      "cliNamespace": "sfx",
+      "description": "Organize and validate sound effects, voices, sample rates, compression, and playback assets.",
+      "status": "available"
+    },
+    {
+      "id": "environment",
+      "label": "3D Environment",
+      "icon": "terrain",
+      "assetKinds": ["model", "texture"],
+      "workspace": "environment",
+      "cliNamespace": "environment",
+      "description": "Curate world models, textures, and collision-ready environment assets.",
+      "status": "available"
+    },
+    {
+      "id": "avatar",
+      "label": "3D Avatars",
+      "icon": "human",
+      "assetKinds": ["model"],
+      "workspace": "avatar",
+      "cliNamespace": "avatar",
+      "description": "Curate character models, rigs, animations, materials, and avatar budgets.",
+      "status": "available"
+    },
+    {
+      "id": "cutscene",
+      "label": "Cutscenes",
+      "icon": "movie-open",
+      "assetKinds": ["node_graph", "ui", "audio"],
+      "workspace": "cutscene",
+      "cliNamespace": "cutscene",
+      "description": "Coordinate visual-script sequences with UI, music, SFX, cameras, and scene transitions.",
+      "status": "available"
+    }
+  ]
+}

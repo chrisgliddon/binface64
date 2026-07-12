@@ -21,6 +21,8 @@ Use this when moving a source asset into a BF64 project.
 ./bf64 import ./crate.ci4.png --project <project> --dest textures/crate.ci4.png --record --json
 ./bf64 asset show assets/textures/crate.ci4.png --project <project> --json
 ./bf64 asset validate-all --project <project> --json
+./bf64 asset validate-all --project <project> --include-excluded --json
+./bf64 asset exclusion add 'reference/**' --project <project> --json
 ```
 
 ## Supported Imports
@@ -36,7 +38,8 @@ The import command copies the asset under `assets/`, writes a `.conf` sidecar wi
 3. Use `--force` only for an intentional overwrite.
 4. Run `asset show` on the imported asset.
 5. Run `asset validate-all` before build.
-6. Let the build pipeline generate `.sprite`, `.bci`, `.t3dm`, `.wav64`, `.xm64`, and font outputs.
+6. Use sidecar `exclude: true` for isolated files and project-level `asset exclusion` globs for draft/reference trees. Normal validation and builds omit both; `--include-excluded` performs a complete source audit.
+7. Let the build pipeline generate `.sprite`, `.bci`, `.t3dm`, `.wav64`, `.xm64`, and font outputs.
 
 ## Grounding
 

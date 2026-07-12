@@ -11,6 +11,7 @@
 #include "../../renderer/bigtex/bigtex.h"
 #include "lib/logger.h"
 #include "renderer/material.h"
+#include "debug/profiler.h"
 #include "scene/scene.h"
 #include "scene/sceneManager.h"
 
@@ -56,6 +57,7 @@ namespace
   {
     for(uint8_t i = 0; i < data->meshIdxCount; ++i) {
       auto mesh = t3d_model_get_object_by_index(data->model, data->meshIndices[i]);
+      P64::Profiler::recordObject(mesh);
       rspq_block_run(mesh->userBlock);
     }
   }
@@ -65,6 +67,7 @@ namespace
     for(uint8_t i = 0; i < data->meshIdxCount; ++i) {
       auto mesh = t3d_model_get_object_by_index(data->model, data->meshIndices[i]);
       if(mesh->isVisible) {
+        P64::Profiler::recordObject(mesh);
         rspq_block_run(mesh->userBlock);
         mesh->isVisible = false;
       }
@@ -76,6 +79,7 @@ namespace
     auto it = t3d_model_iter_create(data->model, T3D_CHUNK_TYPE_OBJECT);
     while(t3d_model_iter_next(&it)) {
       if(it.object->isVisible) {
+        P64::Profiler::recordObject(it.object);
         rspq_block_run(it.object->userBlock);
         it.object->isVisible = false;
       }
@@ -184,6 +188,7 @@ namespace P64::Comp
       }
     } else {
       if(data->meshIdxCount == 0) {
+        Profiler::recordModel(data->model);
         rspq_block_run(data->model->userBlock);
       } else{
         drawNoCullFilter(data);

@@ -17,7 +17,7 @@ bool Build::buildAudioAssets(Project::Project &project, SceneCtx &sceneCtx)
 
   auto procAsset = [&](const Project::AssetManagerEntry &asset)
   {
-    if(asset.conf.exclude)return true;
+    if(asset.isExcluded())return true;
 
     auto projectPath = fs::path{project.getPath()};
     auto outPath = projectPath / asset.outPath;

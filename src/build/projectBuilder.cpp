@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <thread>
 #include <algorithm>
+#include <cstdlib>
 #include "../utils/fs.h"
 #include "../utils/logger.h"
 #include "../utils/proc.h"
@@ -31,6 +32,7 @@ namespace
     {Build::buildFontAssets,    "Font"},
     {Build::buildTextureAssets, "Texture"},
     {Build::buildAudioAssets,   "Audio"},
+    {Build::buildUIAssets,      "UI"},
     // must be last: (@TODO: handle prefab referencing prefab, [not in the editor yet])
     {Build::buildPrefabAssets,  "Prefab"},
   });
@@ -102,7 +104,7 @@ bool Build::buildProject(const std::string &configPath)
   // Asset-Manager
   for (auto &typed : project.getAssets().getEntries()) {
     for (auto &entry : typed) {
-      if (entry.conf.exclude || entry.type == Project::FileType::UNKNOWN
+      if (entry.isExcluded() || entry.type == Project::FileType::UNKNOWN
         || entry.type == Project::FileType::CODE_OBJ
         || entry.type == Project::FileType::CODE_GLOBAL
       ) continue;
@@ -247,6 +249,16 @@ bool Build::buildProject(const std::string &configPath)
       auto uuid = sceneCtx.autoLoadFontUUIDs[i];
       f.write<uint16_t>(uuid == 0 ? 0xFFFF : sceneCtx.assetUUIDToIdx[uuid]);
     }
+    const bool profileEnabled = std::getenv("BF64_PROFILE") != nullptr;
+    auto profileFrames = [&](const char *name, uint16_t fallback) {
+      if(!profileEnabled)return uint16_t{0};
+      const char *value = std::getenv(name);
+      if(value == nullptr)return fallback;
+      auto parsed = std::strtoul(value, nullptr, 10);
+      return static_cast<uint16_t>(std::min<unsigned long>(parsed, 0xFFFF));
+    };
+    f.write<uint16_t>(profileFrames("BF64_PROFILE_WARMUP", 120));
+    f.write<uint16_t>(profileFrames("BF64_PROFILE_FRAMES", 300));
     f.writeToFile(fsDataPath / "conf");
   }
 

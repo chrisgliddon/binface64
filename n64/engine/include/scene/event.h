@@ -11,6 +11,9 @@ namespace P64
   constexpr uint16_t EVENT_TYPE_ENABLE  = 0xFFFF - 0;
   constexpr uint16_t EVENT_TYPE_DISABLE = 0xFFFF - 1;
   constexpr uint16_t EVENT_TYPE_READY   = 0xFFFF - 2;
+  constexpr uint16_t EVENT_TYPE_UI_ACTIVATE = 0xFFFF - 8;
+  constexpr uint16_t EVENT_TYPE_UI_CHANGE   = 0xFFFF - 9;
+  constexpr uint16_t EVENT_TYPE_UI_SUBMIT   = 0xFFFF - 10;
 
   // Safe ranges for user-defined custom events
   constexpr uint16_t EVENT_TYPE_CUSTOM_START = 0x0000;

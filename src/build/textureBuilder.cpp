@@ -22,7 +22,7 @@ bool Build::buildTextureAssets(Project::Project &project, SceneCtx &sceneCtx)
   auto &images = sceneCtx.project->getAssets().getTypeEntries(Project::FileType::IMAGE);
   for (auto &image : images)
   {
-    if (image.conf.exclude)continue;
+    if (image.isExcluded())continue;
 
     sceneCtx.files.push_back(Utils::FS::toUnixPath(image.outPath));
     auto assetPath = fs::path{project.getPath()} / image.outPath;

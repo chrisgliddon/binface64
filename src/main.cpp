@@ -65,7 +65,8 @@ bool hasUnsavedChanges()
     return false;
   }
 
-  return Editor::UndoRedo::getHistory().isDirty() || ctx.project->isDirty();
+  return Editor::UndoRedo::getHistory().isDirty() || ctx.project->isDirty()
+    || (ctx.editorScene && ctx.editorScene->isDirty());
 }
 
 bool confirmCloseWithUnsavedChanges()
@@ -117,7 +118,8 @@ void updateWindowTitle()
     title += " | " + ctx.project->conf.name;
     auto sceneDirty = Editor::UndoRedo::getHistory().isDirty();
     auto projectDirty = ctx.project->isDirty();
-    if (sceneDirty || projectDirty) {
+    auto editorDirty = ctx.editorScene && ctx.editorScene->isDirty();
+    if (sceneDirty || projectDirty || editorDirty) {
       title += " *";
     }
   }
@@ -459,21 +461,18 @@ int main(int argc, char** argv)
 
       ctx.runDeferredActions();
 
-      if (closeRequested) {
-        done = confirmCloseWithUnsavedChanges();
-        if(done)ctx.wantsProjectClose = true;
-      }
-
+      if(closeRequested)ctx.wantsProjectClose = true;
       if(ctx.wantsProjectClose)
       {
-        // Remember this project's open windows before tearing it down (covers app exit too).
-        if(ctx.editorScene) ctx.editorScene->onProjectClosing();
-        Editor::UndoRedo::getHistory().clear();
-        delete ctx.project;
-        ctx.project = nullptr;
+        bool closeConfirmed = confirmCloseWithUnsavedChanges();
         ctx.wantsProjectClose = false;
-        if(closeRequested) {
-          break;
+        if(closeConfirmed) {
+          // Remember this project's open windows before tearing it down (covers app exit too).
+          if(ctx.editorScene) ctx.editorScene->onProjectClosing();
+          Editor::UndoRedo::getHistory().clear();
+          delete ctx.project;
+          ctx.project = nullptr;
+          if(closeRequested)break;
         }
       }
 

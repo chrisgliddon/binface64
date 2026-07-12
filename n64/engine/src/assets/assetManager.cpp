@@ -92,6 +92,7 @@ namespace
     [AssetType::PREFAB]      = {(LoadFunc)assetLoad,      (FreeFunc)free          },
     [AssetType::NODE_GRAPH]  = {P64::NodeGraph::load,     (FreeFunc)free          },
     [AssetType::MUSIC_XM]    = {(LoadFunc)xmLoad,         (FreeFunc)xmFree        },
+    [AssetType::UI_DOCUMENT] = {(LoadFunc)assetLoad,      (FreeFunc)free          },
   };
 
   constinit AssetTable* assetTable{nullptr};

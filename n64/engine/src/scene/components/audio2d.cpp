@@ -25,6 +25,7 @@ namespace P64::Comp
   {
     auto initData = (InitData*)initData_;
     if (initData == nullptr) {
+      data->handle.stop();
       data->~Audio2D();
       return;
     }

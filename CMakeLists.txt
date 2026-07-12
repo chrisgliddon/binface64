@@ -162,8 +162,11 @@ add_executable(pyrite64 src/main.cpp
         src/renderer/framebuffer.cpp
         src/editor/pages/parts/assetsBrowser.h
         src/editor/pages/parts/assetsBrowser.cpp
+        src/editor/pages/parts/uiEditor.h
+        src/editor/pages/parts/uiEditor.cpp
         src/project/assetManager.h
         src/project/assetManager.cpp
+        src/project/assetExclusions.h
         src/utils/hash.h
         src/editor/pages/parts/assetInspector.cpp
         src/editor/pages/parts/assetInspector.h
@@ -251,7 +254,10 @@ add_executable(pyrite64 src/main.cpp
         src/build/tools/bci.cpp
         src/build/tools/bci.h
         src/build/audioBuilder.cpp
+        src/build/uiBuilder.cpp
         src/project/component/types/compAudio2d.cpp
+        src/project/component/types/compAudio3d.cpp
+        src/project/component/types/compUI.cpp
         src/editor/pages/parts/layerInspector.cpp
         src/build/prefabBuilder.cpp
         src/project/component/types/compConstraint.cpp

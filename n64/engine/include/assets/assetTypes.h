@@ -17,4 +17,5 @@ namespace P64::Assets::Type
   constexpr uint8_t PREFAB = 7;
   constexpr uint8_t NODE_GRAPH = 8;
   constexpr uint8_t MUSIC_XM = 9;
+  constexpr uint8_t UI_DOCUMENT = 10;
 }

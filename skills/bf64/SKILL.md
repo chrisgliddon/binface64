@@ -15,7 +15,7 @@ Read this first for Binface64 work. BF64 is an agentic fork of Pyrite64: a hoste
 
 ## Version Pins
 
-- BF64 CLI surface: `tools/bf64.py`, `CLI_VERSION = "0.9.0"`.
+- BF64 CLI surface: `tools/bf64.py`, `CLI_VERSION = "0.17.0"`.
 - Constraint schema: `docs/docs/n64/limits.json`, `schema_version = 1`.
 - tiny3d source pin: `bdcd946`.
 - libdragon source pin: `b1011fe31`.
@@ -56,5 +56,5 @@ If a local checkout disagrees with these pins, inspect the repo before applying 
 
 - Applying generic N64 advice without checking BF64's current validator and docs.
 - Assuming Pyrite64 editor CMake files build ROMs; ROM builds use libdragon/tiny3d Makefiles.
-- Raw-editing scene JSON as the long-term mutation API instead of using supported CLI/editor surfaces.
+- Raw-editing scene JSON instead of using the supported atomic CLI/editor mutation surfaces.
 - Reporting "works" without a JSON validation, build, run, or captured error/log artifact.

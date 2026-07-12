@@ -21,6 +21,8 @@
 #include "../imgui/notification.h"
 #include "../imgui/theme.h"
 #include "parts/assets/modelEditor.h"
+#include <algorithm>
+#include <filesystem>
 
 namespace
 {
@@ -28,10 +30,81 @@ namespace
   constinit bool projectSettingsOpen{false};
   constinit bool needsSanityCheck{false};
   constinit Utils::RingBuffer<double, 16> fpsRingBuffer{};
+
+  const char* assetTypeLabel(Project::FileType type)
+  {
+    using FT = Project::FileType;
+    switch(type) {
+      case FT::IMAGE: return "Texture";
+      case FT::AUDIO: return "Audio";
+      case FT::MUSIC_XM: return "XM Music";
+      case FT::MODEL_3D: return "3D Model";
+      case FT::FONT: return "Font";
+      case FT::NODE_GRAPH: return "Node Graph";
+      case FT::UI_DOCUMENT: return "UI Document";
+      case FT::PREFAB: return "Prefab";
+      default: return "Other";
+    }
+  }
+
+  bool focusAccepts(const std::string &area, const Project::AssetManagerEntry &asset)
+  {
+    using FT = Project::FileType;
+    if(area == "music")return asset.type == FT::MUSIC_XM || asset.type == FT::AUDIO;
+    if(area == "sfx")return asset.type == FT::AUDIO;
+    if(area == "environment")return asset.type == FT::MODEL_3D || asset.type == FT::IMAGE;
+    if(area == "avatar")return asset.type == FT::MODEL_3D;
+    if(area == "cutscene")return asset.type == FT::NODE_GRAPH || asset.type == FT::UI_DOCUMENT
+      || asset.type == FT::AUDIO || asset.type == FT::MUSIC_XM;
+    return false;
+  }
+
+  std::vector<std::string> focusTags(const Project::AssetManagerEntry &asset)
+  {
+    std::vector<std::string> tags{};
+    if(!asset.conf.data.is_object())return tags;
+    auto values = asset.conf.data.value("focusAreas", nlohmann::json::array());
+    if(values.is_array()) {
+      for(const auto &value : values)if(value.is_string())tags.push_back(value.get<std::string>());
+    }
+    auto legacy = asset.conf.data.value("focusArea", std::string{});
+    if(!legacy.empty() && std::find(tags.begin(), tags.end(), legacy) == tags.end())tags.push_back(legacy);
+    return tags;
+  }
+
+  bool hasFocusTag(const Project::AssetManagerEntry &asset, const std::string &area)
+  {
+    auto tags = focusTags(asset);
+    return std::find(tags.begin(), tags.end(), area) != tags.end();
+  }
+
+  void setFocusTag(Project::AssetManagerEntry &asset, const std::string &area, bool enabled)
+  {
+    auto tags = focusTags(asset);
+    auto found = std::find(tags.begin(), tags.end(), area);
+    if(enabled && found == tags.end())tags.push_back(area);
+    if(!enabled && found != tags.end())tags.erase(found);
+    if(!asset.conf.data.is_object())asset.conf.data = nlohmann::json::object();
+    asset.conf.data["focusAreas"] = tags;
+    asset.conf.data.erase("focusArea");
+    ctx.project->getAssets().markAssetMetaDirty(asset.getUUID());
+  }
+
+  const char* focusIcon(const std::string &area)
+  {
+    if(area == "music")return ICON_MDI_MUSIC;
+    if(area == "sfx")return ICON_MDI_VOLUME_HIGH;
+    if(area == "environment")return ICON_MDI_TERRAIN;
+    if(area == "avatar")return ICON_MDI_HUMAN;
+    if(area == "cutscene")return ICON_MDI_MOVIE_OPEN;
+    return ICON_MDI_FOLDER_STAR;
+  }
 }
 
 Editor::Scene::Scene()
 {
+  try { focusCatalog = Utils::JSON::loadFile(std::string{"data/focus-areas.json"}); }
+  catch(...) { focusCatalog = nlohmann::json{{"areas", nlohmann::json::array()}}; }
   Editor::Actions::registerAction(Editor::Actions::Type::OPEN_NODE_GRAPH, [this](const std::string& asset)
   {
     printf("OPEN_NODE_GRAPH action called with asset: %s\n", asset.c_str());
@@ -42,6 +115,12 @@ Editor::Scene::Scene()
       return true;
     }
     return false;
+  });
+  Editor::Actions::registerAction(Editor::Actions::Type::OPEN_UI_DOCUMENT, [this](const std::string &asset)
+  {
+    if(!ctx.project)return false;
+    openUIEditor(std::stoull(asset));
+    return true;
   });
   needsSanityCheck = true;
 
@@ -59,6 +138,7 @@ Editor::Scene::~Scene()
 {
   // The active project's windows are persisted when it is torn down (see persistOpenWindows).
   Editor::Actions::registerAction(Editor::Actions::Type::OPEN_NODE_GRAPH, nullptr);
+  Editor::Actions::registerAction(Editor::Actions::Type::OPEN_UI_DOCUMENT, nullptr);
 }
 
 void Editor::Scene::loadSession()
@@ -71,6 +151,7 @@ void Editor::Scene::loadSession()
         WindowSet ws{};
         if(w.contains("winModels")) for(const auto& u : w["winModels"]) ws.models.push_back(u.get<uint64_t>());
         if(w.contains("winGraphs")) for(const auto& u : w["winGraphs"]) ws.graphs.push_back(u.get<uint64_t>());
+        if(w.contains("winUI")) for(const auto& u : w["winUI"]) ws.ui.push_back(u.get<uint64_t>());
         sessionWindows[path] = std::move(ws);
       }
     }
@@ -83,6 +164,8 @@ void Editor::Scene::loadSession()
         nextViewportWinId = std::max(nextViewportWinId, id + 1);
       }
     }
+    activeFocusArea = json.value("activeFocusArea", std::string{});
+    if(!activeFocusArea.empty())activeWorkspace = Workspace::FOCUS;
   } catch(const std::exception& e) {}
 }
 
@@ -91,12 +174,13 @@ void Editor::Scene::saveSession()
   nlohmann::json conf{};
   conf["projects"] = nlohmann::json::object();
   for(const auto& [path, ws] : sessionWindows) {
-    conf["projects"][path] = { {"winModels", ws.models}, {"winGraphs", ws.graphs} };
+    conf["projects"][path] = { {"winModels", ws.models}, {"winGraphs", ws.graphs}, {"winUI", ws.ui} };
   }
   conf["viewports"] = nlohmann::json::array();
   for(const auto& vp : viewports) {
     conf["viewports"].push_back(vp->saveState());
   }
+  conf["activeFocusArea"] = activeWorkspace == Workspace::FOCUS ? activeFocusArea : std::string{};
   Utils::FS::saveTextFile(Utils::Proc::getAppDataPath() / "editorScene.json", conf.dump(2));
 }
 
@@ -108,6 +192,7 @@ void Editor::Scene::persistOpenWindows()
   for(const auto& nodeEditor : nodeEditors) {
     if(nodeEditor && nodeEditor->getAssetUUID() != 0) ws.graphs.push_back(nodeEditor->getAssetUUID());
   }
+  for(const auto &[assetUUID, _] : uiEditors)ws.ui.push_back(assetUUID);
   sessionWindows[ctx.project->getPath()] = std::move(ws);
   saveSession();
 }
@@ -116,6 +201,7 @@ void Editor::Scene::closeAllEditors()
 {
   nodeEditors.clear();
   modelEditors.clear();
+  uiEditors.clear();
   pendingNodeEditorCloseUUID = 0;
   pendingNodeEditorClosePopup = false;
 }
@@ -139,6 +225,7 @@ void Editor::Scene::restoreWindows()
       nodeEditors.push_back(std::make_shared<NodeEditor>(uuid));
     }
   }
+  for(auto uuid : it->second.ui)if(ctx.project->getAssets().getEntryByUUID(uuid))openUIEditor(uuid);
 }
 
 void Editor::Scene::openModelEditor(uint64_t assetUUID)
@@ -149,6 +236,91 @@ void Editor::Scene::openModelEditor(uint64_t assetUUID)
   } else {
     modelEditors[assetUUID] = std::make_unique<ModelEditor>(assetUUID);
   }
+}
+
+void Editor::Scene::openUIEditor(uint64_t assetUUID)
+{
+  activeWorkspace = Workspace::UI;
+  activeFocusArea.clear();
+  auto it = uiEditors.find(assetUUID);
+  if(it != uiEditors.end())it->second->focus();
+  else uiEditors[assetUUID] = std::make_shared<UIEditor>(assetUUID);
+}
+
+void Editor::Scene::drawFocusWorkspace(ImGuiID dockSpaceID)
+{
+  if(activeWorkspace != Workspace::FOCUS || activeFocusArea.empty())return;
+
+  nlohmann::json area{};
+  for(const auto &candidate : focusCatalog.value("areas", nlohmann::json::array())) {
+    if(candidate.value("id", std::string{}) == activeFocusArea) {
+      area = candidate;
+      break;
+    }
+  }
+  if(!area.is_object())return;
+
+  auto label = area.value("label", activeFocusArea);
+  std::string title = std::string{focusIcon(activeFocusArea)} + " " + label + " Focus";
+  ImGui::SetNextWindowDockID(dockSpaceID, ImGuiCond_FirstUseEver);
+  ImGui::Begin(title.c_str());
+  ImGui::TextWrapped("%s", area.value("description", std::string{}).c_str());
+  ImGui::TextDisabled("Tag compatible assets here; the same membership is used by bf64 %s ls/validate/tag.", activeFocusArea.c_str());
+  ImGui::Separator();
+
+  int compatibleCount = 0;
+  int taggedCount = 0;
+  if(ImGui::BeginTable("FocusAssets", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable)) {
+    ImGui::TableSetupColumn("Asset", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, 100_px);
+    ImGui::TableSetupColumn("Membership", ImGuiTableColumnFlags_WidthFixed, 90_px);
+    ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableHeadersRow();
+
+    for(const auto &typed : ctx.project->getAssets().getEntries()) {
+      for(const auto &asset : typed) {
+        if(!focusAccepts(activeFocusArea, asset))continue;
+        ++compatibleCount;
+        bool tagged = hasFocusTag(asset, activeFocusArea);
+        if(tagged)++taggedCount;
+
+        ImGui::PushID(static_cast<int>(asset.getUUID()));
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        bool selected = ctx.selAssetUUID == asset.getUUID();
+        if(ImGui::Selectable(asset.name.c_str(), selected, ImGuiSelectableFlags_SpanAllColumns)) {
+          ctx.selAssetUUID = asset.getUUID();
+        }
+        bool open = ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextUnformatted(assetTypeLabel(asset.type));
+        ImGui::TableSetColumnIndex(2);
+        if(ImGui::SmallButton(tagged ? "Remove" : "Add")) {
+          if(auto *mutableAsset = ctx.project->getAssets().getEntryByUUID(asset.getUUID())) {
+            setFocusTag(*mutableAsset, activeFocusArea, !tagged);
+          }
+        }
+        ImGui::TableSetColumnIndex(3);
+        ImGui::TextUnformatted(asset.path.c_str());
+
+        if(open) {
+          if(asset.type == Project::FileType::MODEL_3D)openModelEditor(asset.getUUID());
+          else if(asset.type == Project::FileType::NODE_GRAPH)Actions::call(Actions::Type::OPEN_NODE_GRAPH, std::to_string(asset.getUUID()));
+          else if(asset.type == Project::FileType::UI_DOCUMENT)openUIEditor(asset.getUUID());
+        }
+        ImGui::PopID();
+      }
+    }
+    ImGui::EndTable();
+  }
+
+  if(compatibleCount == 0)ImGui::TextDisabled("No compatible assets yet. Import content, then return here to assign it.");
+  ImGui::Separator();
+  ImGui::Text("%d tagged / %d compatible", taggedCount, compatibleCount);
+  ImGui::SameLine();
+  if(ImGui::Button(ICON_MDI_CONTENT_SAVE_OUTLINE " Save Tags"))ctx.project->save();
+  ImGui::End();
 }
 
 void Editor::Scene::draw()
@@ -345,6 +517,37 @@ void Editor::Scene::draw()
   }
   for(auto &uuid : delUUIDs)modelEditors.erase(uuid);
 
+  delUUIDs.clear();
+  for(auto &[uuid, editor] : uiEditors) {
+    if(!editor->draw(dockSpaceID))delUUIDs.push_back(uuid);
+  }
+  for(auto uuid : delUUIDs)uiEditors.erase(uuid);
+
+  if(activeWorkspace == Workspace::UI && uiEditors.empty())
+  {
+    ImGui::SetNextWindowDockID(dockSpaceID, ImGuiCond_FirstUseEver);
+    ImGui::Begin(ICON_MDI_MONITOR_DASHBOARD " UI Workspace");
+    ImGui::TextUnformatted("UI documents");
+    ImGui::Separator();
+    const auto &documents = ctx.project->getAssets().getTypeEntries(Project::FileType::UI_DOCUMENT);
+    for(const auto &document : documents) {
+      ImGui::PushID(static_cast<int>(document.getUUID()));
+      if(ImGui::Selectable((ICON_MDI_FILE_DOCUMENT_OUTLINE " " + document.name).c_str()))openUIEditor(document.getUUID());
+      ImGui::PopID();
+    }
+    if(documents.empty())ImGui::TextDisabled("No .bfui documents yet.");
+    if(ImGui::Button(ICON_MDI_PLUS " Create UI Document")) {
+      std::string name = "New_UI";
+      uint32_t suffix = 2;
+      while(ctx.project->getAssets().getByName(name + ".bfui"))name = "New_UI_" + std::to_string(suffix++);
+      auto uuid = ctx.project->getAssets().createUIDocument(name);
+      if(uuid)openUIEditor(uuid);
+    }
+    ImGui::End();
+  }
+
+  drawFocusWorkspace(dockSpaceID);
+
   ImGui::Begin("Object");
     objectInspector.draw();
   ImGui::End();
@@ -479,6 +682,40 @@ void Editor::Scene::draw()
         if(ImGui::MenuItem(ICON_MDI_HAMMER " Build"))Actions::call(Actions::Type::PROJECT_BUILD);
         if(ImGui::MenuItem(ICON_MDI_PLAY " Build & Run"))Actions::call(Actions::Type::PROJECT_BUILD, "run");
         if(ImGui::MenuItem("Clean"))Actions::call(Actions::Type::PROJECT_CLEAN);
+        ImGui::EndMenu();
+      }
+
+      if(ImGui::BeginMenu("Focus"))
+      {
+        bool sceneActive = activeWorkspace == Workspace::SCENE;
+        bool uiActive = activeWorkspace == Workspace::UI;
+        if(ImGui::MenuItem(ICON_MDI_CUBE_OUTLINE " Scene", nullptr, sceneActive)) {
+          activeWorkspace = Workspace::SCENE;
+          activeFocusArea.clear();
+          ImGui::makeTabVisible("3D-Viewport");
+        }
+        for(const auto &area : focusCatalog.value("areas", nlohmann::json::array())) {
+          auto id = area.value("id", std::string{});
+          auto label = area.value("label", id);
+          auto status = area.value("status", std::string{"planned"});
+          bool available = status == "available";
+          if(!available)ImGui::BeginDisabled();
+          bool selected = id == "ui" ? uiActive : (activeWorkspace == Workspace::FOCUS && activeFocusArea == id);
+          const char *icon = id == "ui" ? ICON_MDI_MONITOR_DASHBOARD : focusIcon(id);
+          std::string menuLabel = std::string{icon} + " " + label;
+          if(ImGui::MenuItem(menuLabel.c_str(), nullptr, selected)) {
+            if(id == "ui") {
+              activeWorkspace = Workspace::UI;
+              activeFocusArea.clear();
+              if(!uiEditors.empty())uiEditors.begin()->second->focus();
+            } else {
+              activeWorkspace = Workspace::FOCUS;
+              activeFocusArea = id;
+            }
+            saveSession();
+          }
+          if(!available)ImGui::EndDisabled();
+        }
         ImGui::EndMenu();
       }
 
@@ -678,6 +915,17 @@ void Editor::Scene::save()
   for(auto &nodeEditor : nodeEditors) {
     nodeEditor->save();
   }
+  for(auto &[_, uiEditor] : uiEditors) {
+    uiEditor->saveIfDirty();
+  }
   persistOpenWindows();
   UndoRedo::getHistory().markSaved();
+}
+
+bool Editor::Scene::isDirty() const
+{
+  for(const auto &[_, uiEditor] : uiEditors) {
+    if(uiEditor->isDirty())return true;
+  }
+  return false;
 }

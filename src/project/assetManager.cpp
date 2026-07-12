@@ -20,6 +20,7 @@
 #include "../utils/meshGen.h"
 #include "../utils/string.h"
 #include "../utils/textureFormats.h"
+#include "assetExclusions.h"
 #include "tiny3d/tools/gltf_importer/src/parser.h"
 
 namespace fs = std::filesystem;
@@ -77,26 +78,24 @@ namespace
     return p.string();
   }
 
-
-  void deserialize(Project::AssetConf &conf, const fs::path &pathMeta)
+  std::vector<std::string> matchingProjectExclusions(
+    const Project::Project &project,
+    const fs::path &path)
   {
-    auto doc = Utils::JSON::loadFile(pathMeta);
-    if (doc.is_object()) {
-      conf.uuid = doc.value<uint64_t>("uuid", 0);
-      conf.format = doc["format"];
-      conf.baseScale = doc["baseScale"];
-      conf.compression = (Project::ComprTypes)doc.value<int>("compression", 0);
-      conf.gltfBVH = doc["gltfBVH"];
-      Utils::JSON::readProp(doc, conf.wavForceMono);
-      Utils::JSON::readProp(doc, conf.wavResampleRate);
-      Utils::JSON::readProp(doc, conf.wavCompression);
-      Utils::JSON::readProp(doc, conf.fontId);
-      Utils::JSON::readProp(doc, conf.fontCharset);
+    std::vector<std::string> matches{};
+    auto assetRoot = fs::absolute(fs::path{project.getPath()} / "assets").lexically_normal();
+    auto assetPath = fs::absolute(path).lexically_normal();
+    auto relative = assetPath.lexically_relative(assetRoot).generic_string();
+    if(relative.empty() || relative == ".." || relative.starts_with("../"))return matches;
 
-      conf.data = doc.contains("data") ? doc["data"] : nlohmann::json::object();
-      conf.exclude = doc["exclude"];
+    for(const auto &configured : project.conf.assetExclusions) {
+      auto normalized = Project::AssetExclusions::normalize(configured);
+      if(!normalized)continue;
+      if(Project::AssetExclusions::matches(relative, *normalized))matches.push_back(configured);
     }
+    return matches;
   }
+
 
   bool buildAssetEntry(Project::Project *project, const fs::path &path, Project::AssetManagerEntry &entry)
   {
@@ -123,9 +122,12 @@ namespace
     } else if (ext == ".glb" || ext == ".gltf") {
       type = Project::FileType::MODEL_3D;
       outPath = changeExt(outPath, ".t3dm");
-    } else if (ext == ".ttf") {
+    } else if (ext == ".ttf" || ext == ".otf") {
       type = Project::FileType::FONT;
       outPath = changeExt(outPath, ".font64");
+    } else if (ext == ".bfui") {
+      type = Project::FileType::UI_DOCUMENT;
+      outPath = changeExt(outPath, ".ui64");
     } else if (ext == ".prefab") {
       type = Project::FileType::PREFAB;
       outPath = changeExt(outPath, ".pf");
@@ -149,17 +151,26 @@ namespace
       .type = type,
     };
 
-    entry.conf.baseScale = 16;
+    entry.matchedProjectExclusions = matchingProjectExclusions(*project, path);
     auto pathMeta = path;
     pathMeta += ".conf";
+    bool confLoadFailed = false;
     if (fs::exists(pathMeta)) {
-      deserialize(entry.conf, pathMeta);
+      try {
+        entry.conf.deserialize(Utils::JSON::loadFile(pathMeta));
+      } catch(const std::exception &exception) {
+        confLoadFailed = true;
+        Utils::Logger::log(
+          "Failed to load asset config: " + pathMeta.string() + " - " + exception.what(),
+          Utils::Logger::LEVEL_ERROR
+        );
+      }
     }
 
     bool forceSave = false;
     if (entry.conf.uuid == 0) {
       entry.conf.uuid = Utils::Hash::randomU64();
-      forceSave = true;
+      forceSave = !entry.isExcluded() && !confLoadFailed;
     }
 
     if (type == Project::FileType::IMAGE) {
@@ -368,13 +379,13 @@ void Project::AssetManager::reload() {
         continue;
       }
 
-      if (assetEntry.type == FileType::IMAGE) {
+      if (!assetEntry.isExcluded() && assetEntry.type == FileType::IMAGE) {
         if (ctx.window) {
           reloadEntry(assetEntry, path.string());
         }
       }
 
-      if (assetEntry.type == FileType::PREFAB) {
+      if (!assetEntry.isExcluded() && assetEntry.type == FileType::PREFAB) {
         reloadEntry(assetEntry, path.string());
         if (assetEntry.prefab) {
           assetEntry.conf.uuid = assetEntry.prefab->uuid.value;
@@ -421,7 +432,7 @@ void Project::AssetManager::reload() {
   // now load models (after all textures are there now)
   for (auto &typed : entries) {
     for (auto &entry : typed) {
-      if (entry.type == FileType::MODEL_3D) {
+      if (!entry.isExcluded() && entry.type == FileType::MODEL_3D) {
         reloadEntry(entry, entry.path);
       }
     }
@@ -543,6 +554,11 @@ bool Project::AssetManager::pollWatch()
 
     auto entry = getByPath(pathStr);
     if (!entry) {
+      return;
+    }
+
+    if(entry->isExcluded()) {
+      clearDirtyTracking(entry->getUUID());
       return;
     }
 
@@ -819,6 +835,33 @@ uint64_t Project::AssetManager::createNodeGraph(const std::string &name)
   reload();
 
   auto entry = getByName(name + ".p64graph");
+  return entry ? entry->getUUID() : 0;
+}
+
+uint64_t Project::AssetManager::createUIDocument(const std::string &name, uint16_t width, uint16_t height)
+{
+  auto assetPath = getAssetPath(project);
+  auto filePath = assetPath / (name + ".bfui");
+  if (fs::exists(filePath))return 0;
+
+  nlohmann::json doc{
+    {"schema", "bf64.ui"},
+    {"version", 1},
+    {"canvas", {
+      {"width", width}, {"height", height},
+      {"safeArea", {8, 8, 8, 8}}, {"snap", 1}
+    }},
+    {"root", {
+      {"id", "root"}, {"type", "Container"},
+      {"layout", {{"anchors", {0.0, 0.0, 1.0, 1.0}}, {"offsets", {0, 0, 0, 0}}}},
+      {"visible", true}, {"enabled", true},
+      {"style", {{"color", "#00000000"}}},
+      {"children", nlohmann::json::array()}
+    }}
+  };
+  Utils::FS::saveTextFile(filePath, doc.dump(2));
+  reload();
+  auto entry = getByName(name + ".bfui");
   return entry ? entry->getUUID() : 0;
 }
 

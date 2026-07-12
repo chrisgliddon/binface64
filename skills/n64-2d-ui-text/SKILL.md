@@ -19,6 +19,8 @@ Use this for HUD, menus, dialogue, icons, labels, and font assets.
 ./bf64 constraints texture --json
 ./bf64 validate ./hud.ci4.png --texture-format CI4 --json
 ./bf64 import ./ui-font.ttf --project <project> --dest fonts/ui-font.ttf --dry-run --json
+./bf64 ui new menus/title --project <project> --json
+./bf64 ui validate --all --project <project> --json
 ```
 
 ## Design Rules
@@ -27,15 +29,21 @@ Use this for HUD, menus, dialogue, icons, labels, and font assets.
 - Use small sprite sheets with deliberate palettes.
 - Prefer high-contrast text and icons over subtle shading.
 - Keep UI textures TMEM-aware; CI4/IA4 are often better than full-color PNGs.
-- Font assets are imported as `.ttf`; the build pipeline uses libdragon `mkfont`.
+- Font assets are imported as `.ttf` or `.otf`; the build pipeline uses libdragon `mkfont`.
+- Fonts referenced by `.bfui` documents need an auto-load ID from 1 through 15.
+- Runtime code addresses elements with the `_ui` literal and receives activate/change/submit object events.
+- TextInput keyboards, maximum lengths, and erase behavior count complete UTF-8 code points; do not pre-split controller charsets into bytes.
+- Use `ProgressBar` plus `UI::setValue(id, current, max)` for mutable HUD meters; authored thresholds provide up to three absolute upper-bound colors.
+- Use `P64::UI::DialogueRunner` for UTF-8-safe typewriter reveal and manual/timed line progression; bind it with `UI::bindDialogue` and keep controller policy in game code.
 
 ## Workflow
 
-1. Decide if the UI is texture sprites, runtime text, or a mix.
-2. Validate sprite sheets with explicit texture format.
-3. Import fonts and sprite sheets through `./bf64 import`.
-4. Keep strings short enough for low-resolution layouts.
-5. Test in emulator screenshots, not only source art previews.
+1. Create or open a `.bfui` document in the UI workspace or with `./bf64 ui new`.
+2. Decide if each element is a texture sprite, runtime text, or a mix.
+3. Validate and import fonts and sprite sheets through `./bf64 import`.
+4. Author `Container`, `Image`, `Text`, `Button`, `TextInput`, and `ProgressBar` elements with stable IDs.
+5. Run `./bf64 ui validate --all`, build, and test emulator screenshots rather than trusting only the desktop preview.
+6. For dialogue, store line strings for the runner's full lifetime, update it once per frame, and map the game's confirm action to `advance()`.
 
 ## Examples
 
@@ -47,6 +55,8 @@ Use this for HUD, menus, dialogue, icons, labels, and font assets.
 - `docs/docs/n64/display-and-video.md`
 - `docs/docs/n64/asset-checklist.md`
 - `docs/docs/agent/CODEMAP.md` `src/build/fontBuilder.cpp` and texture builder entries.
+- `docs/docs/project/ui-focus-area.md`
+- `docs/docs/project/dialogue.md`
 
 ## Common Agent Mistakes
 
@@ -54,3 +64,4 @@ Use this for HUD, menus, dialogue, icons, labels, and font assets.
 - Using anti-aliased tiny fonts that blur at 320x240-style output.
 - Treating source SVG/vector art as a runtime format.
 - Forgetting UI art still competes for TMEM, ROM, and RDRAM.
+- Splitting UTF-8 text manually or rebuilding a game-side typewriter when `DialogueRunner` already preserves code-point boundaries.

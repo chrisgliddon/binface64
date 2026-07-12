@@ -210,6 +210,7 @@ bool Build::buildT3DMAssets(Project::Project &project, SceneCtx &sceneCtx)
 
   for (auto &model : models)
   {
+    if(model.isExcluded())continue;
     auto t3dmPath = projectPath / model.outPath;
     auto t3dmDir = t3dmPath.parent_path();
 

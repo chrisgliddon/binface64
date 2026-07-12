@@ -29,6 +29,7 @@ Use this for SFX, voice, ambience, music, and MIDI-to-module workflows.
 - MIDI is a composition/source format, not a BF64 runtime import format. Export or convert fixed-tempo music to `.xm`, then validate/import the `.xm`.
 - BF64 exposes WAV settings for force-mono, resample rate, and compression; deeper `audioconv64` flags are manual-only until surfaced.
 - XM64 consumes one mixer channel per XM channel; keep background music arrangements lean.
+- WAV/SFX can use the editor's Audio3D component or `AudioManager::play3D`; XM remains 2D. Spatial min/max distance and rolloff do not change the 32-channel mixer budget.
 
 ## Workflow
 
@@ -37,6 +38,7 @@ Use this for SFX, voice, ambience, music, and MIDI-to-module workflows.
 3. Validate channel count and sample-rate/memory tradeoffs.
 4. Import with `--dry-run`, then real import.
 5. Build with the N64 toolchain so `audioconv64` produces `.wav64` or `.xm64`.
+6. For world sounds, validate in Ares with the first scene camera as listener and move the returned handle when the source moves.
 
 ## Reference
 
@@ -49,6 +51,7 @@ Use this for SFX, voice, ambience, music, and MIDI-to-module workflows.
 - `docs/docs/n64/rom-budgets.md`
 - `docs/docs/n64/limits.json`
 - `docs/docs/agent/CODEMAP.md` `src/build/audioBuilder.cpp`.
+- `docs/docs/project/audio3d.md`.
 
 ## Common Agent Mistakes
 

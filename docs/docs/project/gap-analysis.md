@@ -1,8 +1,8 @@
-# Binface64 Gap Analysis
+# Binface64 Gap Analysis: Upstream Baseline and BF64 Status
 
 **Pyrite64 (upstream) vs. N64 hardware capability vs. the engine feature set behind Super Mario 64 & Ocarina of Time**
 
-Prepared for the Binface64 project · Baseline: Pyrite64 v0.6.0 (v0.7.0 in development) · July 2026
+Prepared for the Binface64 project · Historical baseline: Pyrite64 v0.6.0 (v0.7.0 in development) · BF64 status reviewed July 2026
 
 ---
 
@@ -23,6 +23,23 @@ Sources used:
 | 🟡 Partial | Exists but limited, code-only, or requires C++ workarounds |
 | ❌ Absent | No trace in docs, changelog, or API reference; FAQ may explicitly deny it |
 | ❓ Unverified | Not documented; may exist in code or in libdragon/tiny3d underneath — **confirm during BF64 Phase 0 code recon** |
+
+## Current BF64 delta
+
+The comparison tables below intentionally preserve the reviewed **upstream Pyrite64 v0.6 baseline**. They are no longer the current BF64 feature inventory. BF64 has since closed the first shippability tranche:
+
+| Original gap | Current BF64 implementation |
+|---|---|
+| 2D UI/HUD, images, text, input | Versioned `.bfui` assets; dedicated GUI and CLI; Container/Image/Text/Button/TextInput/ProgressBar runtime; stable IDs, focus, events, and mutable values |
+| Dialogue/typewriter | Input-agnostic `P64::UI::DialogueRunner` with UTF-8-safe reveal, manual/timed progression, events, and direct `.bfui` binding |
+| Save data | Public redundant/checksummed EEPROM 4K/16K slot service with generations, corruption fallback, erase tombstones, migrations, and an Ares two-boot probe |
+| Positional audio | `Audio3D` editor/runtime component and `AudioManager::play3D`, with camera listener, distance rolloff, equal-power stereo pan, and movable handles |
+| Headless content mutation | Atomic, validated scene, prefab, and node-graph lifecycle/object/component mutation with dry-run, JSON, recording, stable UUIDs, and rollback |
+| Production focus areas | Shared GUI/CLI areas for UI, Music, SFX, 3D Environment, 3D Avatars, and Cutscenes |
+| Runtime evidence | Bounded structured profiling plus machine-readable frame/render/memory/audio/artifact metrics |
+| Linux setup | Toolchain detection/install and atomic `doctor --fix` for project-local SDK configuration |
+
+Remaining rows such as room streaming, dynamic music direction, shadows, camera behaviors, LOD, authored branching/localization, and game-state flow are still useful backlog. Read any “Absent” UI/save/Audio3D or headless-mutation row below as an upstream finding superseded by this table.
 
 ---
 
@@ -177,10 +194,10 @@ The gap analysis below is therefore *not* "Pyrite64 is behind 1998" — it's ahe
 Ranked by **(shippability impact × frequency of need)**, mapped to the BF64 phased plan. P0 = you can't ship a "top game"-class title without it.
 
 ### P0 — Blocks any complete game
-1. **Save system** (EEPROM/SRAM/FlashRAM component + API; Controller Pak later) — every benchmark game has one; libdragon primitives exist, so this is engine-surface work, not R&D.
-2. **UI/HUD + text/font/dialogue engine** — SM64 and OoT are unimaginable without HUDs and dialog boxes; also required for title screens, menus, and pause. The FAQ confirms 2D is code-only WIP. *Biggest single gap.*
-3. **Positional 3D audio component** (Audio3D) — pan/attenuation by listener distance; the Audio2D-only surface is the most conspicuous asymmetry in an otherwise 3D-native engine.
-4. **Game-state/menu flow framework** — title → gameplay → pause → game over, built on existing scene management.
+1. ✅ **Save system core delivered in BF64:** EEPROM 4K/16K redundant slots, checksums, migrations, and persistence testing. SRAM/FlashRAM and Controller Pak remain later extensions.
+2. 🟡 **UI/HUD + text/typewriter core delivered in BF64:** authored documents, runtime images/text/input/buttons/meters, and dialogue sequencing are present. Localization, branching choices, and inline control codes remain.
+3. ✅ **Positional 3D audio delivered in BF64:** editor component plus runtime pan/attenuation and moving-source controls.
+4. ⬜ **Game-state/menu flow framework remains:** title → gameplay → pause → game over, built on existing scene management.
 
 ### P1 — Separates "demo" from "Ocarina-class"
 5. **Room/sub-scene streaming** — OoT's defining trick; determines whether BF64 games are SM64-sized courses or OoT-sized worlds. Verify AssetManager's granularity in Phase 0 before designing.
@@ -198,13 +215,14 @@ Ranked by **(shippability impact × frequency of need)**, mapped to the BF64 pha
 15. **Animation blending controls** surfaced in AnimModel (if verification shows they're not already exposed).
 16. **Environment mapping / fake reflections**, **code overlays** for very large games, **Controller Pak** saves.
 
-### Agent-surface gaps (parallel track — these ARE the BF64 phased plan)
-- CLI expansion with `--json` and validation → **Phase 5**
-- MCP server → **Phase 6**
-- Extensions system + headless scene mutation → **Phase 7**
-- Skills encoding all constraints above → **Phases 3–4**
+### Agent-surface status
+- ✅ CLI expansion with stable `--json`, validation, build/run/profile, focus areas, and operation history
+- ✅ Supported scene, prefab, node-graph, asset-exclusion, and project mutation surfaces
+- ✅ Skills encoding the reviewed constraints and current workflows
+- ⬜ MCP server remains a separate integration layer over the CLI contracts
+- ⬜ A general third-party Extensions/plugin ABI remains separate from the supported headless mutation work
 
-**Suggested absorption into the phased plan:** P0 items 1–4 warrant a new engineering phase between the current Phase 7 (Extensions) and Phase 8 (Contributing) — call it **Phase 7.5: Shippability Systems** — because Phase 9's dogfood micro-game will otherwise hit the save/UI/audio walls immediately and log them all as blockers anyway. Cheaper to build them deliberately than discover them under fire.
+**Current disposition:** the core of the proposed Phase 7.5 shippability tranche is implemented. Dogfooding should now concentrate on game-state flow and the remaining authoring depth instead of rebuilding save/UI/Audio3D primitives game-side.
 
 ---
 
@@ -226,17 +244,17 @@ Carry these into the BF64 Phase 0 code recon; each flips an ❓ above to ✅/❌
 2. Is fog configurable per-scene/per-material through the editor, or only via fast64 material import?
 3. What is the actual granularity of `AssetManager` load/unload — could room streaming be built on it without redesign?
 4. Does the runtime detect/use Expansion Pak RAM (8MB) anywhere?
-5. Do libdragon's joypad, rumble, and save-storage (EEPROM/SRAM/FlashRAM) APIs pass through to the P64 runtime, or are they unreachable without touching engine internals?
+5. **Resolved in BF64:** joypad was already runtime-facing; BF64 now wraps EEPROM 4K/16K. Rumble, SRAM/FlashRAM, and Controller Pak remain unsurfaced.
 6. Is skinned-mesh (flex) import supported end-to-end through the GLTF pipeline?
 7. Does the PTX system support world-space 3D particles or screen-space sprites only?
-8. What exactly can the current CLI do beyond `build`/`clean` (undocumented commands)?
-9. Is there any existing sequenced-music (XM/YM) path from the asset browser to the ROM?
-10. How far along is the "WIP" 2D support in code — is there a usable sprite/rect draw API to build a UI system on?
+8. **Resolved in BF64:** `./bf64` now covers constraints, toolchain, project, import/assets, exclusions, scenes, prefabs, node graphs, UI/focus areas, build/run/profile, and history.
+9. **Resolved for playback/import:** XM is imported and built to XM64 through Audio2D; dynamic layers/transitions/stingers remain absent.
+10. **Resolved in BF64:** `.bfui` supplies the authored 2D document/editor/builder/runtime surface described in the status table.
 
 ---
 
 ## 9. Bottom Line
 
-Pyrite64 is a **rendering- and physics-forward** engine that already beats 1996–2000 retail technology in several dimensions (HDR, big textures, general physics, tooling). What it lacks — confirmed by its own docs and FAQ — is the **game-shipping layer**: saves, UI/text, 3D audio, music direction, streaming, and camera/gameplay frameworks. Those systems are exactly what Nintendo EAD's internal libraries provided on top of the SGI microcode in 1996–98, and they are the difference between a beautiful tech demo and *Super Mario 64*.
+Upstream Pyrite64 is a **rendering- and physics-forward** engine that already beats 1996–2000 retail technology in several dimensions (HDR, big textures, general physics, tooling). The original review correctly identified its missing game-shipping layer. BF64 now supplies the first core pieces—save data, authored UI/text/input/meters, dialogue sequencing, positional audio, structured profiling, and supported headless production workflows—while music direction, streaming, shadows, camera/game-state frameworks, and richer authored narrative systems remain meaningful product gaps.
 
-For Binface64, that's good news twice over: the hard low-level work (microcode, physics, pipeline, editor) is done and actively maintained upstream, and the missing layer is precisely the kind of well-specified systems work that agents — armed with the `/skills` constraints library and the MCP/CLI surface — are best at building and testing in tight ROM-in-emulator loops.
+That leaves BF64 in a more useful dogfooding position: agents can build against stable shippability primitives and use real ROM/Ares evidence to discover the next gaps, rather than reproducing foundational UI/save/audio services inside every game.

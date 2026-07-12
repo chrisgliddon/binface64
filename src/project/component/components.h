@@ -88,6 +88,8 @@ namespace Project::Component
   MAKE_COMP(NodeGraph)
   MAKE_COMP(AnimModel)
   MAKE_COMP(CharBody)
+  MAKE_COMP(UI)
+  MAKE_COMP(Audio3D)
 
   namespace Camera
   {
@@ -279,6 +281,31 @@ namespace Project::Component
       .funcSerialize = CharBody::serialize,
       .funcDeserialize = CharBody::deserialize,
       .funcBuild = CharBody::build,
+      .funcGetAABB = nullptr
+    },
+    CompInfo{
+      .id = 13,
+      .icon = ICON_MDI_MONITOR_DASHBOARD " ",
+      .name = "UI Document",
+      .docSlug = "/manual/editor/components/ui",
+      .funcInit = UI::init,
+      .funcDraw = UI::draw,
+      .funcSerialize = UI::serialize,
+      .funcDeserialize = UI::deserialize,
+      .funcBuild = UI::build,
+      .funcGetAABB = nullptr
+    },
+    CompInfo{
+      .id = 14,
+      .icon = ICON_MDI_VOLUME_HIGH " ",
+      .name = "Audio (3D)",
+      .docSlug = "/manual/editor/components/audio3d",
+      .funcInit = Audio3D::init,
+      .funcDraw = Audio3D::draw,
+      .funcDrawPost3D = Audio3D::draw3D,
+      .funcSerialize = Audio3D::serialize,
+      .funcDeserialize = Audio3D::deserialize,
+      .funcBuild = Audio3D::build,
       .funcGetAABB = nullptr
     },
   };

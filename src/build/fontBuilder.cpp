@@ -17,6 +17,7 @@ bool Build::buildFontAssets(Project::Project &project, SceneCtx &sceneCtx)
   auto &fonts = sceneCtx.project->getAssets().getTypeEntries(Project::FileType::FONT);
   for (auto &font : fonts)
   {
+    if(font.isExcluded())continue;
     auto projectPath = fs::path{project.getPath()};
     auto outPath = projectPath / font.outPath;
     auto outDir = outPath.parent_path();

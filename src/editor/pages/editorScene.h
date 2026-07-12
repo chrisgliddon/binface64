@@ -15,6 +15,7 @@
 #include "parts/sceneGraph.h"
 #include "parts/sceneInspector.h"
 #include "parts/viewport3D.h"
+#include "parts/uiEditor.h"
 
 namespace Editor
 {
@@ -37,6 +38,7 @@ namespace Editor
       // Editors
       std::vector<std::shared_ptr<NodeEditor>> nodeEditors{};
       std::map<uint64_t, std::shared_ptr<ModelEditor>> modelEditors{};
+      std::map<uint64_t, std::shared_ptr<UIEditor>> uiEditors{};
       PreferenceOverlay prefOverlay{};
       ProjectSettings projectSettings{};
       AssetsBrowser assetsBrowser{};
@@ -57,15 +59,20 @@ namespace Editor
 
       // Which model/graph windows were open, remembered per project (keyed by project path)
       // so switching projects never restores another project's windows.
-      struct WindowSet { std::vector<uint64_t> models{}; std::vector<uint64_t> graphs{}; };
+      struct WindowSet { std::vector<uint64_t> models{}; std::vector<uint64_t> graphs{}; std::vector<uint64_t> ui{}; };
       std::map<std::string, WindowSet> sessionWindows{};
       // Path of the project whose windows are currently restored ("" = none yet).
       std::string restoredForProject{};
+      enum class Workspace : uint8_t { SCENE, UI, FOCUS };
+      Workspace activeWorkspace{Workspace::SCENE};
+      std::string activeFocusArea{};
+      nlohmann::json focusCatalog{};
 
       void loadSession();
       void saveSession();
       void restoreWindows();
       void closeAllEditors();
+      void drawFocusWorkspace(ImGuiID dockSpaceID);
       // Save the currently-open windows for the active project.
       void persistOpenWindows();
 
@@ -74,6 +81,7 @@ namespace Editor
       ~Scene();
 
       void openModelEditor(uint64_t assetUUID);
+      void openUIEditor(uint64_t assetUUID);
 
       // Call before the active project is torn down (switch/close/exit): captures its open
       // windows while still valid, then closes the editors so they can't leak into the next.
@@ -81,5 +89,6 @@ namespace Editor
 
       void draw();
       void save();
+      [[nodiscard]] bool isDirty() const;
   };
 }

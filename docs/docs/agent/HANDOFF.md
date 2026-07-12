@@ -2,8 +2,8 @@
 
 **Repo:** `https://github.com/chrisgliddon/binface64` (fork of `HailToDodongo/pyrite64`)
 **Current branch:** `main`
-**Last session:** Asset import command (2026-07-09)
-**Next session:** Phase 5 hardening — prefab/node-graph validators and duplicate UUID repair
+**Last session:** Focus-area and shippability tranche (2026-07-11)
+**Next session:** Dogfood the complete surface in a first playable; prioritize game-state flow and domain-specific focus tooling found through use
 
 This is the **only** memory between sessions. Read it first. Update it before ending a session.
 
@@ -24,11 +24,11 @@ This is the **only** memory between sessions. Read it first. Update it before en
 | 0 | Codebase recon & architecture map | ✅ Done | `e5f5d7d` | ~moderate | ARCHITECTURE.md, CODEMAP.md, HANDOFF.md (this file), DIVERGENCE.md (early-start) all written |
 | 1 | N64 hardware research compendium | ✅ Done | (this session) | ~moderate | 6 docs in docs/docs/n64/: hardware, performance-budgets, libdragon-tiny3d, display-and-video, audio, emulation-and-hardware-testing. n64.rst toctree + index.rst wired. Submodules init'd. |
 | 2 | Asset requirements & limitations | ✅ Done | (this session) | ~moderate | 5 docs in docs/docs/n64/: textures, models-and-meshes, audio-assets, rom-budgets, asset-checklist. n64.rst toctree updated. 3 parallel explore subagents over vendored tiny3d gltf_importer, libdragon audioconv64/mixer, mksprite/rdpq_tex/BCI. Both Phase 0 open questions #8 (glTF material set) and #9 (audioconv64 .mp3) resolved. Sphinx build verified (3 pre-existing warnings, none new). |
-| 3 | `/skills` scaffold + core engine skills | ⬜ Not started | — | ~300K est | Next session. See kickoff prompt in `phased-plan.md` Phase 3. |
-| 4 | Asset & content pipeline skills | ⬜ Not started | — | ~300K est | |
-| 5 | `bf64` CLI | 🌱 Seeded | (this session) | ~400K est | Out-of-order seed now includes root `./bf64`, `--version`, `doctor`, `new`, `import`, `project status`, dry-run/executable `build`, `run`, asset/project/scene validation, read-only `asset ls/show/validate-all`, read-only `scene ls/show/validate`, history schema v2, fixture tests, and CLI CI. Not the full Phase 5 CLI yet. |
+| 3 | `/skills` scaffold + core engine skills | ✅ Done | working tree | — | Router and focused BF64/N64 skills are present and linted against the current surface. |
+| 4 | Asset & content pipeline skills | ✅ Done | working tree | — | Model, texture, audio, UI, import, design-budget, and QA skills are present. |
+| 5 | `bf64` CLI | ✅ Delivered | working tree | — | CLI v0.17 covers project/assets/exclusions, scene/prefab/node-graph mutation, focus areas, toolchain, build/run/profile, JSON/history, and validation. |
 | 6 | MCP server | ⬜ Not started | — | ~400K est | |
-| 7 | Extensions system | ⬜ Not started | — | ~400K est (splittable 7a/7b) | |
+| 7 | Extensions system | 🟡 Partial | working tree | — | Supported headless scene/prefab/node-graph mutation is delivered; a general third-party extension ABI remains separate. |
 | 8 | CONTRIBUTING.md, vision, agent onboarding | ⬜ Not started | — | ~250K est | |
 | 9 | Dogfood micro-game + hardening | ⬜ Not started | — | ~400K est | |
 
@@ -37,6 +37,43 @@ This is the **only** memory between sessions. Read it first. Update it before en
 - All N64 technical claims cite `docs/docs/n64/`; all API claims are verified against source.
 - Upstream Pyrite64 credits stay intact; divergence is tracked in `docs/docs/agent/DIVERGENCE.md`.
 - Every new capability ships with a matching skill in `/skills`.
+
+---
+
+## Current implementation snapshot (2026-07-11)
+
+The historical session log below is retained for provenance, but its “remaining Phase 5 gaps” are superseded by this snapshot.
+
+### Delivered
+
+- Shared exclusion-aware asset selection for build and `asset validate-all`, with `--include-excluded` and separate included/excluded/skipped/passed/failed counts.
+- Atomic headless scene lifecycle, object/component mutation, asset/script attachments, stable UUIDs, dry-run, JSON/history, validation, rollback, and pair-safe prefab/node-graph CRUD/mutation.
+- Versioned `.bfui` source, UI editor/CLI/builder/runtime, Container/Image/Text/Button/TextInput/ProgressBar elements, stable IDs, controller focus/events, runtime text/visibility/image/value mutation, and threshold colors.
+- Dedicated GUI/CLI production areas for UI, Music, SFX, 3D Environment, 3D Avatars, and Cutscenes using the shared `data/focus-areas.json` catalog and multi-area sidecar tags.
+- Structured bounded runtime profiling with frame/FPS percentiles, render counters, peak RDRAM, mixer voices, ROM/DFS/ELF sizes, target/emulator identity, and atomic JSON artifacts.
+- Merge-safe `init`/`new --merge`, project exclusion globs, Linux `toolchain detect/install`, and atomic `doctor --fix` with project-local `.bf64/env.sh`.
+- Public EEPROM 4K/16K save service with redundant banks, checksums, generations, corruption fallback, tombstone erase, migrations, host regression coverage, a standalone probe ROM, and verified two-boot Ares persistence.
+- Audio3D editor/runtime component plus listener-relative distance attenuation, equal-power pan, moving handles, first-camera listener integration, host math regression, MIPS build, and authored-project ROM build.
+- `P64::UI::DialogueRunner` with UTF-8-safe typewriter reveal, manual/timed progression, UI/callback sinks, lifecycle events, cancellation, host regression coverage, and MIPS compilation.
+
+### Verification baseline
+
+- `python3 -m unittest discover -s tests -p 'test_*.py'`
+- `python3 -m py_compile bf64 tools/bf64.py tools/bf64_ui.py`
+- `python3 scripts/lint-skills.py` and `python3 scripts/check-skills-package.py`
+- `N64_INST=/home/chris/Documents/libdragon-sdk make -C n64/engine -j2`
+- `N64_INST=/home/chris/Documents/libdragon-sdk make -C n64/tests/save_probe -j2`
+- `ninja -C build -j2 pyrite64`
+- Ares (`dev.ares.ares`) save-probe launches with graceful window close between boots
+
+### Remaining product work
+
+- Dogfood these APIs in the first playable and turn evidence into focused fixes.
+- Add game-state/menu-flow helpers if repeated title/pause/game-over glue emerges.
+- Add authored branching/localization/control-code dialogue and visual cutscene timing only after the runtime runner is exercised.
+- Deepen Music/SFX/Environment/Avatar/Cutscene workspaces when stable domain formats (mixes, environment sets, avatar manifests, timelines) are designed; current workspaces intentionally organize existing assets.
+- MCP and a general external extension/plugin ABI remain distinct future integrations.
+- SRAM/FlashRAM, Controller Pak, rumble, dynamic music direction, room streaming, shadows, camera behaviors, LOD, and path/spline systems remain later engine backlog.
 
 ---
 

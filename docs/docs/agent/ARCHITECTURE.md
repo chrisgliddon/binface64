@@ -410,7 +410,9 @@ These rows fill `P64::Script::getCodeByIndex/getCodeSizeByIndex` (`script/script
 - Load + self-repair: `Project::Project` ctor `src/project/project.cpp:167-247` — reads JSON, creates required dirs (`data/scenes`, `assets/p64`, `src/p64`, `src/user`), writes `.gitignore` from `data/build/baseGitignore`, writes `Makefile.custom` from `data/build/baseMakefile.custom`, copies `assets/p64/font.ia4.png` from `data/build/assets/font.ia4.png`. Compares `editorVersion` to `PYRITE_VERSION`; older → forces clean build (`project.cpp:212-220`). **GOTCHA:** opening a project can silently delete your `build/` and `engine/build/` if the editor version bumped, even if you had local changes there.
 - Save: `Project::save()` `project.cpp:258-263` → `saveConfig()` (writes `.p64proj`), then `assets.save()` and `scenes.save()`.
 
-**Project config JSON keys** (from `project.cpp:125-147`): `name`, `romName`, `pathEmu`, `pathN64Inst`, `editorVersion`, `romHeader` (object: `category`, `region`, `saveType`, `regionFree`, `rtc`, `controllers[4]`), `metadata` (object: `enabled`, `langs[]` of MetaLang with `lang`,`name`,`author`,`releaseDate`,`osiLicense`,`website`,`shortDesc`,`longDesc`,`ageRating`,`screenshots[]`,`boxFront/Back/Top/Bottom/Left/Right`,`cartFront/Back`), `sceneIdOnBoot`, `sceneIdOnReset`, `sceneIdLastOpened`, `debugMenu`, `collLayer0..7`.
+**Project config JSON keys** (from `project.cpp:125-147`): `name`, `romName`, `pathEmu`, `pathN64Inst`, `editorVersion`, `romHeader` (object: `category`, `region`, `saveType`, `regionFree`, `rtc`, `controllers[4]`), `metadata` (object: `enabled`, `langs[]` of MetaLang with `lang`,`name`,`author`,`releaseDate`,`osiLicense`,`website`,`shortDesc`,`longDesc`,`ageRating`,`screenshots[]`,`boxFront/Back/Top/Bottom/Left/Right`,`cartFront/Back`), `sceneIdOnBoot`, `sceneIdOnReset`, `sceneIdLastOpened`, `debugMenu`, `assetExclusions` (array of assets-relative slash-aware globs), `collLayer0..7`.
+
+`assetExclusions` is the project-wide alternative to one `"exclude": true` sidecar per file. `*` and `?` stay within one path segment, `**` crosses directories, and a pattern without `/` matches basenames anywhere. Absolute paths and `.`/`..`/empty segments are invalid. The native asset manager stores every matching pattern on an entry; `AssetManagerEntry::isExcluded()` combines project matches with the sidecar flag. All native builders and the headless inventory/validation/build plan consume that effective state. The Project Settings GUI authors these patterns, and `bf64 asset exclusion list/add/remove` provides the atomic headless surface.
 
 **Project subdirs** (created in ctor, `project.cpp:178-186`):
 - `data/scenes/` — scene dirs named by integer id, each with `scene.json`
@@ -472,7 +474,9 @@ Serialized with `doc.dump(minify ? -1 : 2)` (`scene.cpp:392`) — pretty-printed
 ```
 Deserialized by `Object::deserialize` `object.cpp:105-172`. Note: `uuid` is a **32-bit** hash for scene objects; prefab UUIDs are 64-bit. A legacy `"id"` field may be present but is intentionally ignored (`object.cpp:109-110`); runtime ids are build-time only (`object.h:31-33`, assigned in `Scene::assignRuntimeIds` `scene.cpp:493-514`, max 65535).
 
-**Components:** `Component::Entry` (`components.h:28-34`): `id` (int index into `Component::TABLE`), `uuid` (u64), `name`, `data` (shared_ptr<void>). The `TABLE` (`components.h:110-284`) maps ids 0-12 to the 13 component types. Each `CompInfo` has `funcSerialize`/`funcDeserialize` that produce/consume the `data` JSON object. **GOTCHA:** the `id` is a plain integer that must stay stable — adding or reordering component types breaks all saved scenes. The `constexpr TABLE` order is the canonical id assignment.
+**Components:** `Component::Entry` (`components.h`): `id` (int index into `Component::TABLE`), `uuid` (u64), `name`, `data` (shared_ptr<void>). The `TABLE` maps ids 0-13 to the 14 component types, including UI Document at id 13. Each `CompInfo` has `funcSerialize`/`funcDeserialize` that produce/consume the `data` JSON object. **GOTCHA:** the `id` is a plain integer that must stay stable — adding or reordering component types breaks all saved scenes. The `constexpr TABLE` order is the canonical id assignment.
+
+**Headless mutation:** `tools/bf64.py` exposes scene lifecycle, object-tree, component, and attachment commands over this same JSON contract. Proposed documents are validated before same-directory atomic replacement. Scene deletion is transactional across the scene directory and `project.p64proj`, with automatic rollback when final project validation or I/O fails. Generated object UUIDs are 32-bit; component UUIDs are 64-bit, matching the editor model.
 
 **Prefab system** (`src/project/scene/prefab.h/.cpp`): a `Prefab` is just `PROP_U32(uuid) + Object obj`, serialized as JSON, saved to `<project>/assets/<sanitizedName>.prefab` (`scene.cpp:285`). `Scene::createPrefabFromObject` (`scene.cpp:244`) **rebases child transforms to be relative to their parent** (`scene.cpp:256-275`) because the engine has no runtime transform hierarchy — this is critical and the comment at `scene.cpp:252` explains why. `Scene::unpackPrefabInstance` (`scene.cpp:312`) materializes a prefab instance into real editable objects with baked world transforms. `Scene::addPrefabInstance` (`scene.cpp:140`) creates a thin instance with transform overrides pre-added.
 
@@ -543,11 +547,13 @@ Two distinct concepts:
 
 ### 3.6 Audio assets
 
-**Component:** `Component::Audio2D` (`src/project/component/types/compAudio2d.cpp`). `Data` = `{audioUUID, volume, loop, autoPlay}`. Built: resolves UUID → asset index (u16, `0xDEAD` if missing), writes volume as u16 (`*0xFFFF`), flags byte (bit0 loop, bit1 autoPlay, bit2 = MUSIC_XM type).
+**Components:** `Component::Audio2D` (`src/project/component/types/compAudio2d.cpp`) stores `{audioUUID, volume, loop, autoPlay}` and supports WAV or XM. `Component::Audio3D` (`compAudio3d.cpp`, stable id 14) stores WAV UUID, source volume, loop/auto-play, min/max distance, and rolloff. Both resolve UUID → asset index at build time; Audio3D rejects tracker music and writes its spatial floats into the runtime init block.
 
 **Import/store:** source `.wav`/`.mp3` → AUDIO, `.xm` → MUSIC_XM. `Build::buildAudioAssets` (`src/build/audioBuilder.cpp:14-64`) shells out to libdragon's **`audioconv64`** (`<N64_INST>/bin/audioconv64`). Audio flags: `--wav-mono`, `--wav-resample <rate>`, `--wav-compress <level>` (only applied to AUDIO, not MUSIC_XM). Output `.wav64` (audio) / `.xm64` (music).
 
 **Formats:** input WAV/MP3/XM; output WAV64 (libdragon's compressed wav format, supports vadpcm/opus) and XM64. Opus (`wavCompression==3`) triggers `needsOpus` in `buildGlobalScripts` which injects `wav64_init_compression(3)` into the game-init hook (`scriptBuilder.cpp:145-156`).
+
+**Runtime spatialization:** `audio/spatialAudio.cpp` is dependency-light math for distance attenuation and equal-power stereo pan. `AudioManager::play3D` marks a WAV slot group as spatial; handles can move it or replace settings without restarting. `Scene::update` uses the first camera as listener, and `Comp::Audio3D` follows its object's world position. The manager applies handle/master-volume changes across every channel occupied by a multi-channel WAV and treats default/stale handles as inert.
 
 **GOTCHA:** `audioconv64` is invoked with the same flags for both AUDIO types but the wav-* flags are only added when `asset.type == AUDIO` (`audioBuilder.cpp:33-43`); an `.mp3` typed as AUDIO will pass `--wav-*` flags to `audioconv64` which may or may not accept them for mp3 input — undocumented.
 
@@ -625,7 +631,7 @@ Color names must exactly match `ImGui::GetStyleColorName(i)` (`theme.cpp:31-35`)
 
 ### 4.1 Toolchain
 
-`src/utils/toolchain.cpp`/`.h`. `ctx.toolchain.scan()` (`main.cpp:158`) probes for the libdragon/gcc-mips toolchain. On Windows, the toolchain is auto-installed (the launcher's "Install Toolchain" button, `toolchainOverlay.cpp`). On Linux/macOS, the user is expected to have `N64_INST` env set or `pathN64Inst` configured in the project. **GOTCHA:** if `pathN64Inst` is empty on non-Windows and `N64_INST` env is unset, the build proceeds with an empty toolchain path (`projectBuilder.cpp:62-68`) and `make` will fail with cryptic missing-tool errors rather than a clear "SDK not configured" message. Windows falls back to `/pyrite64-sdk` (`projectBuilder.cpp:70-74`).
+`src/utils/toolchain.cpp`/`.h`. `ctx.toolchain.scan()` (`main.cpp:158`) probes for the libdragon/gcc-mips toolchain. On Windows, the toolchain is auto-installed (the launcher's "Install Toolchain" button, `toolchainOverlay.cpp`). The supported headless Linux path is `bf64 toolchain detect/install` followed by transactional `doctor --fix`, which persists `pathN64Inst` and `.bf64/env.sh`. The headed editor itself still expects `N64_INST` or `pathN64Inst` on Linux/macOS. **GOTCHA:** launching an editor build with both empty still reaches `make` with an empty toolchain path (`projectBuilder.cpp:62-68); run strict `bf64 doctor` first to get an actionable preflight instead of the resulting missing-tool errors. Windows falls back to `/pyrite64-sdk` (`projectBuilder.cpp:70-74`).
 
 ### 4.2 Build flow
 
@@ -637,7 +643,7 @@ Color names must exactly match `ImGui::GetStyleColorName(i)` (`theme.cpp:31-35`)
 4. Build node graphs → `src/p64/<uuid>.cpp` + `filesystem/.../<name>.pg` (`buildNodeGraphAssets`).
 5. Build scripts → `src/p64/scriptTable.cpp`, `src/p64/globalScriptTable.cpp` (`buildScripts`/`buildGlobalScripts`).
 6. Build scenes → binary scene/object files; generate `src/p64/sceneTable.h` + `.cpp` (`projectBuilder.cpp:156-188`, `buildScene`).
-7. Build assets in order: 3D Model (`t3dmBuilder`), Font, Texture, Audio, **Prefab last** (`projectBuilder.cpp:29-36`, `191-197`). Each writes into `filesystem/`.
+7. Build assets in order: 3D Model (`t3dmBuilder`), Font, Texture, Audio, UI, **Prefab last** (`projectBuilder.cpp`, `uiBuilder.cpp`). Each writes into `filesystem/`.
 8. Generate `src/p64/assetTable.h` from `assetFileMap` (`projectBuilder.cpp:199-203`).
 9. Write asset table binary `filesystem/p64/a` (`projectBuilder.cpp:206-218`): u32 count, then per-asset (offset, type+flags packed), then concatenated `romPath` strings.
 10. Generate `Makefile` from `data/build/baseMakefile.mk` substituting `{{N64_INST}}`, `{{ROM_NAME}}`, `{{PROJECT_NAME}}`, `{{ASSET_LIST}}`, `{{USER_CODE_DIRS}}`, `{{ROM_HEADER_FLAGS}}`, `{{P64_SELF_PATH}}`, `{{PROJECT_SELF_PATH}}` (`projectBuilder.cpp:225-240`).
@@ -647,7 +653,7 @@ Color names must exactly match `ImGui::GetStyleColorName(i)` (`theme.cpp:31-35`)
 ### 4.3 Intermediate & final outputs
 
 All under project dir:
-- `filesystem/` — converted assets (`.sprite`, `.wav64`, `.xm64`, `.t3dm`, `.font64`, `.pf`, `.pg`, `.bci`) + `.sdata` sidecars (from t3dm, collected `t3dmBuilder.cpp:258-272`)
+- `filesystem/` — converted assets (`.sprite`, `.wav64`, `.xm64`, `.t3dm`, `.font64`, `.ui64`, `.pf`, `.pg`, `.bci`) + `.sdata` sidecars (from t3dm, collected `t3dmBuilder.cpp:258-272`)
 - `filesystem/p64/a` — asset table binary
 - `filesystem/p64/conf` — runtime boot config
 - `filesystem/p64/fileList.txt` — asset-list cache for change detection
@@ -670,7 +676,25 @@ All under project dir:
 
 ---
 
-## 5. Gotchas index (cross-cutting)
+## 5. UI focus-area architecture
+
+`.bfui` is a versioned JSON asset recognized as `FileType::UI_DOCUMENT`. `Build::buildUIAssets` resolves image/font UUID or project-path references, validates stable CRC32 element IDs, and emits a big-endian `.ui64` header, fixed 64-byte element table, and deduplicated string table. Runtime loading uses asset type 10 and the normal raw `asset_load`/`free` handler.
+
+The editor's `UIEditor` is opened from **Focus → UI**, the asset browser, or the asset inspector. It edits the same JSON consumed by `bf64 ui`; there is no hidden editor-only document model.
+
+Scene component id 13 is `UI Document`. Runtime `Comp::UI` owns mutable element/input state and exposes stable-ID setters/getters, including `setValue` for ProgressBar fill state. Progress bars keep `value/max` in component state and apply the first matching authored absolute color threshold. `ComponentDef::draw2D` is dispatched once after all camera passes, preventing one UI document from being drawn once per camera. Controller interactions return through `EVENT_TYPE_UI_ACTIVATE`, `EVENT_TYPE_UI_CHANGE`, and `EVENT_TYPE_UI_SUBMIT`, with the element CRC32 in `ObjectEvent::value`.
+
+`ui/dialogue.cpp` provides a renderer/input-independent `DialogueRunner`. It retains a caller-owned line array, reveals complete UTF-8 code points at per-line/default rates, waits for manual `advance()` or a configured hold, and emits lifecycle callbacks. `Comp::UI::bindDialogue` adapts its text sink to two stable element IDs; the runner can also be host-tested without libdragon.
+
+Font references currently require existing auto-load slots 1–15. Asset pointers still follow normal scene lifetime rules; UI component pointers and `getText()` results must not be retained across scene transitions.
+
+`debug/profiler.cpp` implements the `bf64.runtime-profile` v1 target protocol. A build-time request is appended to `filesystem/p64/conf`; the runtime discards the configured warm-up, samples at most 2048 frames, instruments post-culling T3D object submissions, heap/top-down allocations, and mixer voices, then emits one JSON line. The Python `run --profile` process reader combines that record with host artifact sizes and emulator metadata into the atomic `bf64.profile` artifact.
+
+`save/saveManager.cpp` is the public EEPROM persistence layer. Each logical slot owns two aligned physical banks containing a 24-byte versioned header and fixed-capacity payload. Writes fill an inactive bank in `writing` state and commit it with a final 8-byte block; reads choose the newest valid generation by header/payload CRC, fall back to a valid peer on corruption, and can migrate/rewrite old schemas. Erase commits a tombstone so an older bank cannot reappear. Version 1 supports EEPROM 4K/16K only.
+
+---
+
+## 6. Gotchas index (cross-cutting)
 
 The most important fragile/surprising things, gathered in one place for quick scanning:
 
