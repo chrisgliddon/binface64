@@ -33,6 +33,9 @@
 #include "renderer/drawLayer.h"
 #include "scene/componentTable.h"
 #include "script/globalScript.h"
+#include "input/input.h"
+#include "multiplayer/session.h"
+#include "multiplayer/viewports.h"
 
 namespace
 {
@@ -134,6 +137,13 @@ P64::Scene::~Scene()
 {
   rspq_wait();
 
+  Input::stopAllRumble();
+  for(std::uint8_t player=0; player<Multiplayer::MAX_PLAYERS; ++player) {
+    if(Multiplayer::getSession().getPlayer(player).boundObject) {
+      Multiplayer::getSession().bindObject(player, nullptr);
+    }
+  }
+
   for(auto obj : objects) {
     obj->~Object();
     free(obj);
@@ -149,9 +159,14 @@ P64::Scene::~Scene()
 
 void P64::Scene::update(float deltaTime)
 {
+  Input::update(deltaTime);
+  auto &multiplayer = Multiplayer::getSession();
+  multiplayer.syncControllers();
   Profiler::beginFrame(deltaTime);
-  accumulator_ticks += TICKS_FROM_US((uint32_t)(deltaTime * 1000000.0f));
-  joypad_poll();
+  Profiler::setActivity(multiplayer.activeCount(), getActiveCameraCount());
+  multiplayer.update(deltaTime);
+  const bool gameplayPaused = multiplayer.gameplayPaused();
+  if(!gameplayPaused)accumulator_ticks += TICKS_FROM_US((uint32_t)(deltaTime * 1000000.0f));
 
   // reset metrics
   ticksActorUpdate = 0;
@@ -167,7 +182,18 @@ void P64::Scene::update(float deltaTime)
   //debugf("cam %p: %d | %f\n", camMain, cameras.size(), (double)camMain->pos.z);
 
   ticksGlobalUpdate = get_user_ticks();
-  GlobalScript::callHooks(GlobalScript::HookType::SCENE_UPDATE);
+  GlobalScript::callHooks(GlobalScript::HookType::SCENE_UNSCALED_UPDATE);
+  for(auto obj : objects) {
+    if(!obj->isEnabled())continue;
+    auto compRefs = obj->getCompRefs();
+    for(std::uint32_t i=0; i<obj->compCount; ++i) {
+      const auto &compDef = COMP_TABLE[compRefs[i].type];
+      if(!compDef.unscaledUpdate)continue;
+      char *dataPtr = reinterpret_cast<char*>(obj) + compRefs[i].offset;
+      compDef.unscaledUpdate(*obj, dataPtr, deltaTime);
+    }
+  }
+  if(!gameplayPaused)GlobalScript::callHooks(GlobalScript::HookType::SCENE_UPDATE);
   ticksGlobalUpdate = get_user_ticks() - ticksGlobalUpdate;
 
   for(auto data : objectsToAdd) {
@@ -177,7 +203,9 @@ void P64::Scene::update(float deltaTime)
       {
         uint16_t storedParent = obj.group; // parent's index within the prefab
         obj.id = data.objectId + i;
-        obj.flags = ObjectFlags::ACTIVE | (obj.flags & ObjectFlags::HAS_CHILDREN);
+        obj.flags = ObjectFlags::ACTIVE | (obj.flags & (
+          ObjectFlags::HAS_CHILDREN | ObjectFlags::VIEW_MASK | ObjectFlags::VIEW_MASK_AUTHORED
+        ));
         if(i == 0) {
           // The root is placed directly at the spawn transform, parented if requested.
           obj.group = data.parentId;
@@ -230,7 +258,7 @@ void P64::Scene::update(float deltaTime)
   {
     accumulator_ticks = fixedDeltaTimeTicks * MAX_PHYSICS_STEPS;
   }
-  while (accumulator_ticks >= fixedDeltaTimeTicks)
+  while (!gameplayPaused && accumulator_ticks >= fixedDeltaTimeTicks)
   {
     for(auto obj : objects)
     {
@@ -257,7 +285,7 @@ void P64::Scene::update(float deltaTime)
   }
 
   ticksActorUpdate = get_ticks();
-  for(auto obj : objects)
+  if(!gameplayPaused)for(auto obj : objects)
   {
     if(!obj->isEnabled())continue;
 
@@ -265,16 +293,31 @@ void P64::Scene::update(float deltaTime)
 
     for (uint32_t i=0; i<obj->compCount; ++i) {
       const auto &compDef = COMP_TABLE[compRefs[i].type];
+      if(!compDef.update)continue;
       char* dataPtr = (char*)obj + compRefs[i].offset;
       compDef.update(*obj, dataPtr, deltaTime);
     }
   }
 
+  updateCameraLayout();
+  Profiler::setActivity(multiplayer.activeCount(), getActiveCameraCount());
   for(auto &cam : cameras) {
+    if(!cam->isActive())continue;
     cam->update(deltaTime);
   }
 
-  if(!cameras.empty())AudioManager::setListener(*cameras[0]);
+  AudioManager::clearListeners();
+  if(isSplitScreen()) {
+    for(auto *camera : cameras) {
+      if(camera->isActive() && camera->getViewTarget() == Camera::Target::Player)AudioManager::addListener(*camera);
+    }
+  } else {
+    Camera *listener = getSharedCamera();
+    if(listener == nullptr || !listener->isActive()) {
+      for(auto *camera : cameras)if(camera->isActive()) { listener = camera; break; }
+    }
+    if(listener)AudioManager::addListener(*listener);
+  }
 
   ticksActorUpdate = get_ticks() - ticksActorUpdate;
 
@@ -306,8 +349,11 @@ void P64::Scene::draw([[maybe_unused]] float deltaTime)
   DrawLayer::draw(0);
 
   // 3D Pass, for every active camera
+  uint8_t profilerCameraIndex = 0;
   for(auto &cam : cameras)
   {
+    if(!cam->isActive())continue;
+    Profiler::beginCamera(profilerCameraIndex++);
     camMain = cam;
     cam->attach();
 
@@ -328,6 +374,10 @@ void P64::Scene::draw([[maybe_unused]] float deltaTime)
     {
       //debugf(" - %d\n", obj->id);
       if(!obj->isEnabled())continue;
+      if((obj->getViewMask() & cam->getViewMask()) == 0) {
+        obj->setFlag(ObjectFlags::IS_CULLED, false);
+        continue;
+      }
       auto compRefs = obj->getCompRefs();
 
       for (uint32_t i=0; i<obj->compCount; ++i)
@@ -538,6 +588,77 @@ void P64::Scene::updateChildObjectStates(const Object* parent, Object& obj)
   iterObjectChildren(obj.id, [&](Object* child) {
     updateChildObjectStates(&obj, *child);
   });
+}
+
+void P64::Scene::updateCameraLayout()
+{
+  std::uint8_t activeMask = Multiplayer::getSession().activeMask();
+  if(activeMask == 0 && getSharedCamera() == nullptr)activeMask = Multiplayer::getSession().connectedMask();
+
+  std::array<Multiplayer::Viewports::Rect, 4> rectangles{};
+  [[maybe_unused]] const auto playerViewportCount = Multiplayer::Viewports::calculate(
+    activeMask,
+    static_cast<std::int16_t>(conf.screenWidth),
+    static_cast<std::int16_t>(conf.screenHeight),
+    rectangles
+  );
+
+  bool hasActivePlayerCamera = false;
+  for(auto *camera : cameras) {
+    if(camera->getViewTarget() != Camera::Target::Player)continue;
+    const std::uint8_t player = camera->getTargetPlayer();
+    const bool active = player < 4 && (activeMask & (1u << player)) && rectangles[player].valid();
+    camera->setActive(active);
+    if(!active)continue;
+    const auto &rect = rectangles[player];
+    camera->setScreenArea(rect.x, rect.y, rect.width, rect.height);
+    camera->aspectRatio = static_cast<float>(rect.width) / static_cast<float>(rect.height);
+    hasActivePlayerCamera = true;
+  }
+
+  for(auto *camera : cameras) {
+    switch(camera->getViewTarget()) {
+      case Camera::Target::Manual:
+        camera->setActive(true);
+        break;
+      case Camera::Target::Shared:
+        camera->setActive(!hasActivePlayerCamera);
+        if(camera->isActive()) {
+          camera->setScreenArea(0, 0, conf.screenWidth, conf.screenHeight);
+          camera->aspectRatio = static_cast<float>(conf.screenWidth) / static_cast<float>(conf.screenHeight);
+        }
+        break;
+      case Camera::Target::Player:
+        break;
+    }
+  }
+}
+
+P64::Camera* P64::Scene::getCameraForPlayer(uint8_t player) const
+{
+  for(auto *camera : cameras) {
+    if(camera->getViewTarget() == Camera::Target::Player && camera->getTargetPlayer() == player)return camera;
+  }
+  return nullptr;
+}
+
+P64::Camera* P64::Scene::getSharedCamera() const
+{
+  for(auto *camera : cameras)if(camera->getViewTarget() == Camera::Target::Shared)return camera;
+  return nullptr;
+}
+
+uint8_t P64::Scene::getActiveCameraCount() const
+{
+  uint8_t result{};
+  for(auto *camera : cameras)if(camera->isActive())++result;
+  return result;
+}
+
+bool P64::Scene::isSplitScreen() const
+{
+  for(auto *camera : cameras)if(camera->isActive() && camera->getViewTarget() == Camera::Target::Player)return true;
+  return false;
 }
 
 P64::Lighting & P64::Scene::startLightingOverride(bool copyExisting)

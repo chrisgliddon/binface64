@@ -1,0 +1,40 @@
+{
+  "name": "Local Multiplayer Reference",
+  "romName": "bf64_multiplayer",
+  "pathEmu": "ares",
+  "pathN64Inst": "",
+  "sceneIdOnBoot": 1,
+  "sceneIdOnReset": 1,
+  "sceneIdLastOpened": 1,
+  "debugMenu": true,
+  "romHeader": {
+    "category": 0,
+    "region": 0,
+    "saveType": 0,
+    "regionFree": true,
+    "rtc": false,
+    "controllers": [1, 1, 1, 1]
+  },
+  "multiplayer": {
+    "targetRdramMB": 4,
+    "controllers": [
+      {"name": "Blue / Player 1", "rumble": true},
+      {"name": "Red / Player 2", "rumble": true},
+      {"name": "Green / Player 3", "rumble": true},
+      {"name": "Gold / Player 4", "rumble": true}
+    ]
+  },
+  "input": {
+    "deadZone": 0.18,
+    "actions": [
+      {"name": "ready", "bindings": [{"buttons": 8, "chord": 0}]},
+      {"name": "confirm", "bindings": [{"buttons": 1, "chord": 0}]},
+      {"name": "pause", "bindings": [{"buttons": 8, "chord": 1024}]},
+      {"name": "primary", "bindings": [{"buttons": 1, "chord": 0}, {"buttons": 4, "chord": 0}]}
+    ],
+    "axes": [
+      {"name": "move_x", "bindings": [{"source": "stick_x", "scale": 1.0, "deadZone": 0.18}, {"source": "dpad_x", "scale": 1.0, "deadZone": 0.0}]},
+      {"name": "move_y", "bindings": [{"source": "stick_y", "scale": 1.0, "deadZone": 0.18}, {"source": "dpad_y", "scale": 1.0, "deadZone": 0.0}]}
+    ]
+  }
+}

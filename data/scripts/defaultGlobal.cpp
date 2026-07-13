@@ -39,6 +39,12 @@ namespace P64::GlobalScript::__UUID__
     // this is done before all the object updates.
   }
 
+  void onSceneUnscaledUpdate()
+  {
+    // called every frame even while multiplayer has paused gameplay after a disconnect.
+    // Use this for reconnect prompts and other UI/state that must keep advancing.
+  }
+
   void onScenePreDraw()
   {
     // called once per frame during the draw phase of the frame.

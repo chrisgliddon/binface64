@@ -5,6 +5,8 @@
 #include "scene/object.h"
 #include "scene/components/camera.h"
 
+#include <algorithm>
+
 #include "scene/scene.h"
 
 void P64::Comp::Camera::initDelete(Object &obj, Camera* data, InitData* initData)
@@ -30,10 +32,12 @@ void P64::Comp::Camera::initDelete(Object &obj, Camera* data, InitData* initData
     cam.aspectRatio = (float)initData->vpSize[0] / (float)initData->vpSize[1];
   }
 
+  cam.setViewTarget(initData->target, std::min<uint8_t>(initData->player, 3));
+
   cam.setPosRot(obj.pos, obj.rot);
 }
 
-void P64::Comp::Camera::update(Object &obj, Camera* data, float deltaTime)
+void P64::Comp::Camera::update(Object &obj, Camera* data, [[maybe_unused]] float deltaTime)
 {
   if(data->mode == Mode::OBJECT) {
     data->camera.setPosRot(obj.pos, obj.rot);

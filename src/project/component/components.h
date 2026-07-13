@@ -90,6 +90,8 @@ namespace Project::Component
   MAKE_COMP(CharBody)
   MAKE_COMP(UI)
   MAKE_COMP(Audio3D)
+  MAKE_COMP(PlayerSpawn)
+  MAKE_COMP(BlobShadow)
 
   namespace Camera
   {
@@ -306,6 +308,30 @@ namespace Project::Component
       .funcSerialize = Audio3D::serialize,
       .funcDeserialize = Audio3D::deserialize,
       .funcBuild = Audio3D::build,
+      .funcGetAABB = nullptr
+    },
+    CompInfo{
+      .id = 15,
+      .icon = ICON_MDI_MAP_MARKER " ",
+      .name = "Player Spawn",
+      .docSlug = "/manual/editor/components/player-spawn",
+      .funcInit = PlayerSpawn::init,
+      .funcDraw = PlayerSpawn::draw,
+      .funcSerialize = PlayerSpawn::serialize,
+      .funcDeserialize = PlayerSpawn::deserialize,
+      .funcBuild = PlayerSpawn::build,
+      .funcGetAABB = nullptr
+    },
+    CompInfo{
+      .id = 16,
+      .icon = ICON_MDI_CIRCLE_OPACITY " ",
+      .name = "Blob Shadow",
+      .docSlug = "/manual/editor/components/blob-shadow",
+      .funcInit = BlobShadow::init,
+      .funcDraw = BlobShadow::draw,
+      .funcSerialize = BlobShadow::serialize,
+      .funcDeserialize = BlobShadow::deserialize,
+      .funcBuild = BlobShadow::build,
       .funcGetAABB = nullptr
     },
   };

@@ -94,6 +94,8 @@ COMPONENT_NAMES = (
     "Character-Body",
     "UI Document",
     "Audio (3D)",
+    "Player Spawn",
+    "Blob Shadow",
 )
 COMPONENT_ALIASES = {
     "code": 0,
@@ -123,6 +125,10 @@ COMPONENT_ALIASES = {
     "audio3d": 14,
     "positionalaudio": 14,
     "spatialaudio": 14,
+    "playerspawn": 15,
+    "spawn": 15,
+    "blobshadow": 16,
+    "shadow": 16,
 }
 COMPONENT_ASSET_FIELDS = {
     1: ("model", "model"),
@@ -601,6 +607,15 @@ def collect_object_stats(graph: Any, max_component_id: int) -> tuple[dict[str, A
                         issues.append(issue("error", "SCENE_AUDIO3D_RANGE", "Audio (3D) rolloff must be positive."))
                     if not 0.125 <= float(numeric["pitch"]) <= 8.0:
                         issues.append(issue("error", "SCENE_AUDIO3D_RANGE", "Audio (3D) pitch must be in 0.125..8."))
+            elif comp_id == 15:
+                data = comp["data"]
+                target = data.get("target")
+                index = data.get("index")
+                if (not isinstance(target, int) or isinstance(target, bool) or target not in {0, 1, 2} or
+                        not isinstance(index, int) or isinstance(index, bool) or not 0 <= index <= 255):
+                    issues.append(issue("error", "SCENE_PLAYER_SPAWN", f"{path} object '{name}' Player Spawn has invalid target/index data."))
+                elif target == 1 and index >= 4:
+                    issues.append(issue("error", "SCENE_PLAYER_SPAWN", f"{path} object '{name}' Player Spawn player index must be in 0..3."))
         if rigid_body_count > 1:
             issues.append(
                 issue(
@@ -1427,6 +1442,7 @@ def validate_model(
     accessors = doc.get("accessors") or []
     vertex_count = 0
     index_count = 0
+    triangle_count = 0
     has_weights = False
     for mesh in doc.get("meshes") or []:
         for prim in mesh.get("primitives") or []:
@@ -1439,12 +1455,18 @@ def validate_model(
                     index_count += count
             idx_idx = prim.get("indices")
             if isinstance(idx_idx, int) and idx_idx < len(accessors):
-                index_count += int(accessors[idx_idx].get("count") or 0)
+                primitive_indices = int(accessors[idx_idx].get("count") or 0)
+                index_count += primitive_indices
+                if int(prim.get("mode", 4)) == 4:
+                    triangle_count += primitive_indices // 3
+            elif isinstance(pos_idx, int) and pos_idx < len(accessors) and int(prim.get("mode", 4)) == 4:
+                triangle_count += int(accessors[pos_idx].get("count") or 0) // 3
             if "WEIGHTS_0" in attrs or "JOINTS_1" in attrs or "WEIGHTS_1" in attrs:
                 has_weights = True
 
     metadata["vertex_count"] = vertex_count
     metadata["index_count"] = index_count
+    metadata["triangle_count"] = triangle_count
     if vertex_count > int(limits["model"]["max_vertices_per_file"]):
         issues.append(
             issue(
@@ -1494,11 +1516,113 @@ def validate_model(
             )
         )
 
+    data = conf.get("data") if isinstance(conf.get("data"), dict) else {}
+    reviewed = bool(data.get("reviewed3d", False))
+    category = str(data.get("category", "")).strip().lower()
+    budgets = {
+        "player": (1000, 4, 20),
+        "enemy": (600, 2, 12),
+        "environment": (3500, 16, 0),
+        "prop": (200, 2, 0),
+    }
+    if category:
+        metadata["category"] = category
+        if category not in budgets:
+            issues.append(issue("error", "M9", f"Unknown model budget category '{category}'.", "Use player, enemy, environment, or prop."))
+        else:
+            triangle_ceiling, material_ceiling, bone_ceiling = budgets[category]
+            metadata["triangle_ceiling"] = triangle_ceiling
+            metadata["material_ceiling"] = material_ceiling
+            metadata["bone_ceiling"] = bone_ceiling
+            if triangle_count > triangle_ceiling:
+                issues.append(issue("error", "M9", f"{category} model has {triangle_count} triangles; ceiling is {triangle_ceiling}."))
+            if len(materials) > material_ceiling:
+                issues.append(issue("error", "M9", f"{category} model has {len(materials)} materials; ceiling is {material_ceiling}."))
+    elif reviewed:
+        issues.append(issue("error", "M9", "Reviewed 3D assets must declare data.category in the sidecar."))
+
+    skins = doc.get("skins") or []
+    bone_count = max((len(skin.get("joints") or []) for skin in skins if isinstance(skin, dict)), default=0)
+    metadata["bone_count"] = bone_count
+    if category in budgets and budgets[category][2] == 0 and bone_count:
+        issues.append(issue("error", "M5", f"{category} assets must be unskinned; found {bone_count} bones."))
+    elif category in budgets and budgets[category][2] and bone_count > budgets[category][2]:
+        issues.append(issue("error", "M5", f"{category} model has {bone_count} bones; ceiling is {budgets[category][2]}."))
+
+    non_applied_nodes: list[str] = []
+    for index, node in enumerate(doc.get("nodes") or []):
+        if not isinstance(node, dict) or ("mesh" not in node and "skin" not in node):
+            continue
+        translation = node.get("translation", [0, 0, 0])
+        rotation = node.get("rotation", [0, 0, 0, 1])
+        scale = node.get("scale", [1, 1, 1])
+        if translation != [0, 0, 0] or rotation != [0, 0, 0, 1] or scale != [1, 1, 1]:
+            non_applied_nodes.append(str(node.get("name") or f"node[{index}]"))
+    metadata["non_applied_transform_nodes"] = non_applied_nodes
+    if non_applied_nodes:
+        issues.append(issue(
+            "error" if reviewed else "warning", "M2",
+            f"Mesh/armature transforms are not applied on: {', '.join(non_applied_nodes[:5])}.",
+            "Apply location, rotation, and scale before Fast64 export.",
+        ))
+
+    external_images: list[str] = []
+    embedded_images: list[str] = []
+    tmem_estimates: list[dict[str, Any]] = []
+    for index, image in enumerate(doc.get("images") or []):
+        if not isinstance(image, dict):
+            continue
+        name = str(image.get("name") or f"image[{index}]")
+        uri = image.get("uri")
+        if not isinstance(uri, str) or uri.startswith("data:") or "bufferView" in image:
+            embedded_images.append(name)
+            continue
+        external_images.append(uri)
+        texture_path = path.parent / uri
+        if Path(uri).suffix.lower() != ".png":
+            issues.append(issue("error", "M3", f"Model texture '{uri}' is not PNG."))
+            continue
+        if not texture_path.is_file():
+            issues.append(issue("error", "M3", f"External model texture is missing: {texture_path}."))
+            continue
+        try:
+            png = read_png_info(texture_path)
+            texture_conf, _texture_conf_path = load_conf(texture_path, None)
+            texture_format = parse_texture_format(texture_conf.get("format", 0), limits)
+            format_name = texture_format[0] if texture_format and texture_format[0] != "AUTO" else "RGBA16"
+            estimate = estimate_texture_bytes(int(png["width"]), int(png["height"]), format_name, limits)
+            tmem_estimates.append({"path": uri, "format": format_name, "bytes": estimate})
+            if estimate > 4096:
+                issues.append(issue("error", "T3", f"Texture '{uri}' estimates to {estimate} bytes, over 4 KB TMEM."))
+        except Exception as exc:  # noqa: BLE001
+            issues.append(issue("error", "M3", f"Could not inspect external texture '{uri}': {exc}."))
+    metadata["external_pngs"] = external_images
+    metadata["embedded_images"] = embedded_images
+    metadata["texture_tmem_estimates"] = tmem_estimates
+    if embedded_images:
+        issues.append(issue(
+            "error" if reviewed else "warning", "M3", f"Embedded model textures are unsupported: {', '.join(embedded_images[:5])}.",
+            "Export image references as external PNG files.",
+        ))
+    if reviewed and not external_images and bool(data.get("requiresTexture", False)):
+        issues.append(issue("error", "M3", "This reviewed asset requires an external PNG but references none."))
+
+    collision_asset = data.get("collisionAsset")
+    if collision_asset:
+        collision_path = path.parent / str(collision_asset)
+        metadata["collision_asset"] = str(collision_asset)
+        if not collision_path.is_file():
+            issues.append(issue("error", "M10", f"Collision pair is missing: {collision_path}."))
+    elif reviewed and category == "environment":
+        issues.append(issue("error", "M10", "Reviewed environment assets must declare data.collisionAsset."))
+
     allowed_targets = set(limits["model"]["allowed_animation_targets"])
     max_seconds = 0.0
     bad_targets: list[str] = []
     non_linear = False
-    for anim in doc.get("animations") or []:
+    animation_names: list[str] = []
+    for anim_index, anim in enumerate(doc.get("animations") or []):
+        animation_names.append(str(anim.get("name") or f"animation[{anim_index}]"))
         samplers = anim.get("samplers") or []
         for sampler in samplers:
             if sampler.get("interpolation") in {"STEP", "CUBICSPLINE"}:
@@ -1516,6 +1640,11 @@ def validate_model(
             if target and target not in allowed_targets:
                 bad_targets.append(str(target))
     metadata["max_animation_seconds"] = max_seconds
+    metadata["animation_clips"] = animation_names
+    required_animations = [str(name) for name in data.get("requiredAnimations", [])] if isinstance(data.get("requiredAnimations"), list) else []
+    missing_animations = sorted(set(required_animations) - set(animation_names))
+    if missing_animations:
+        issues.append(issue("error", "M7", f"Required animation clips are missing: {', '.join(missing_animations)}."))
     if max_seconds > float(limits["model"]["max_animation_seconds"]):
         issues.append(
             issue(
@@ -2020,6 +2149,65 @@ def toolchain_summary(doctor: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def multiplayer_readiness(project_root: Path, config: dict[str, Any]) -> dict[str, Any]:
+    multiplayer = config.get("multiplayer") if isinstance(config.get("multiplayer"), dict) else {}
+    mask = optional_int(multiplayer.get("enabledPortMask"))
+    mask = (0x0F if mask is None else mask) & 0x0F
+    host = optional_int(multiplayer.get("hostPort"))
+    host = min(max(0 if host is None else host, 0), 3)
+    enabled_ports = [port + 1 for port in range(4) if mask & (1 << port)]
+
+    policy_names = {
+        0x00: "disabled", 0x01: "port1", 0x02: "port2", 0x04: "port3",
+        0x08: "port4", 0x0F: "any", 0x10: "host",
+    }
+    ui_policies: set[str] = set()
+    cameras_by_scene: dict[str, int] = {}
+    for scene_id, path in iter_scene_files(project_root)[0]:
+        if not path.is_file():
+            continue
+        try:
+            doc = read_json_file(path)
+        except Exception:  # project validation reports parse failures
+            continue
+        if not isinstance(doc, dict):
+            continue
+        camera_count = 0
+        for obj, _parent, _siblings in scene_object_records(doc):
+            if not obj.get("enabled", True):
+                continue
+            components = obj.get("components") if isinstance(obj.get("components"), list) else []
+            for component in components:
+                if not isinstance(component, dict):
+                    continue
+                if component.get("id") == 3:
+                    camera_count += 1
+                elif component.get("id") == 13:
+                    data = component.get("data") if isinstance(component.get("data"), dict) else {}
+                    raw = optional_int(data.get("inputPlayerMask"))
+                    raw = 1 if raw is None else raw & 0x1F
+                    ui_policies.add(policy_names.get(raw, f"mask:0x{raw:02x}"))
+        cameras_by_scene[str(scene_id)] = camera_count
+
+    boot_scene = str(config.get("sceneIdOnBoot", 1))
+    return {
+        "enabled_port_mask": mask,
+        "enabled_ports": enabled_ports,
+        "host_port": host + 1,
+        "four_port_ready": mask == 0x0F,
+        "ui_input_policies": sorted(ui_policies) or ["port1"],
+        "active_camera_count": cameras_by_scene.get(boot_scene, 0),
+        "camera_count_by_scene": cameras_by_scene,
+        "profile_support": {
+            "available": True,
+            "fields": [
+                "active_players", "active_cameras", "per_camera_model_submissions",
+                "procedural_triangles", "chunk_triangles", "particles", "material_changes",
+            ],
+        },
+    }
+
+
 def suggested_next_actions(
     validation: dict[str, Any],
     doctor: dict[str, Any],
@@ -2073,6 +2261,7 @@ def build_project_status(project_arg: str | None, strict_doctor: bool = False) -
         "doctor": doctor,
         "toolchain": toolchain_summary(doctor),
         "assets": inventory,
+        "multiplayer": multiplayer_readiness(project_root, config),
         "issues": status_issues,
         "next_actions": suggested_next_actions(validation, doctor, inventory),
     }
@@ -2101,6 +2290,12 @@ def print_project_status(result: dict[str, Any]) -> None:
     toolchain = result.get("toolchain", {})
     if isinstance(toolchain, dict):
         print(f"Toolchain: build_ready={toolchain.get('build_ready')} run_ready={toolchain.get('run_ready')}")
+    multiplayer = result.get("multiplayer", {})
+    if isinstance(multiplayer, dict):
+        print(
+            f"Multiplayer: ports={multiplayer.get('enabled_ports')} host={multiplayer.get('host_port')} "
+            f"cameras={multiplayer.get('active_camera_count')} UI={multiplayer.get('ui_input_policies')}"
+        )
     if result.get("next_actions"):
         print("Next actions:")
         for action in result["next_actions"]:
@@ -3166,10 +3361,13 @@ def execute_build(args: argparse.Namespace) -> dict[str, Any]:
     result["execute"]["binary"] = str(binary)
     result["execute"]["argv"] = argv
     build_env = os.environ.copy()
+    if getattr(args, "rdram", None) in {4, 8}:
+        build_env["BF64_RDRAM_MB"] = str(args.rdram)
+        result["execute"]["rdram_mb"] = args.rdram
     if bool(getattr(args, "profile", False)):
         build_env["BF64_PROFILE"] = "1"
-        build_env["BF64_PROFILE_WARMUP"] = str(getattr(args, "profile_warmup", 120))
-        build_env["BF64_PROFILE_FRAMES"] = str(getattr(args, "profile_frames", 300))
+        build_env["BF64_PROFILE_WARMUP"] = str(getattr(args, "profile_warmup", 180))
+        build_env["BF64_PROFILE_FRAMES"] = str(getattr(args, "profile_frames", 600))
         result["execute"]["profile"] = {
             "enabled": True,
             "warmup_frames": int(build_env["BF64_PROFILE_WARMUP"]),
@@ -3386,6 +3584,7 @@ def prepare_emulator_argv(
     *,
     homebrew_mode: bool = False,
     emulator_version_text: str = "",
+    rdram_mb: int | None = None,
 ) -> list[str]:
     argv = list(emulator_argv)
     resolved_project_root = project_root.expanduser().resolve()
@@ -3410,6 +3609,8 @@ def prepare_emulator_argv(
         # post-v148 settings reorganization moved it under Developer.
         setting = "General/HomebrewMode=true" if version <= 148 else "Developer/HomebrewMode=true"
         argv.extend(["--setting", setting])
+    if rdram_mb in {4, 8} and is_ares and not any("Nintendo64/ExpansionPak=" in part for part in argv):
+        argv.extend(["--setting", f"Nintendo64/ExpansionPak={'true' if rdram_mb == 8 else 'false'}"])
     argv.append(str(resolved_rom_path))
     return argv
 
@@ -3449,7 +3650,9 @@ def terminate_profile_process(proc: subprocess.Popen[str]) -> None:
             pass
 
 
-def execute_profile_emulator(argv: list[str], timeout_seconds: int) -> dict[str, Any]:
+def execute_profile_emulator(
+    argv: list[str], timeout_seconds: int, env: dict[str, str] | None = None
+) -> dict[str, Any]:
     started_at = time.perf_counter()
     proc = subprocess.Popen(
         argv,
@@ -3460,6 +3663,7 @@ def execute_profile_emulator(argv: list[str], timeout_seconds: int) -> dict[str,
         errors="replace",
         bufsize=1,
         start_new_session=os.name != "nt",
+        env=env,
     )
     output_queue: queue.Queue[str | None] = queue.Queue()
 
@@ -3586,8 +3790,9 @@ def write_profile_artifact(
 
 def execute_run(args: argparse.Namespace) -> dict[str, Any]:
     profile_requested = bool(getattr(args, "profile", False))
-    profile_warmup = int(getattr(args, "profile_warmup", 120))
-    profile_frames = int(getattr(args, "profile_frames", 300))
+    profile_warmup = int(getattr(args, "profile_warmup", 180))
+    profile_frames = int(getattr(args, "profile_frames", 600))
+    requested_rdram = getattr(args, "rdram", None)
     build_result: dict[str, Any] | None = None
     if args.build:
         build_args = argparse.Namespace(
@@ -3597,6 +3802,7 @@ def execute_run(args: argparse.Namespace) -> dict[str, Any]:
             profile=profile_requested,
             profile_warmup=profile_warmup,
             profile_frames=profile_frames,
+            rdram=requested_rdram,
         )
         build_result = execute_build(build_args)
         if not build_result.get("ok"):
@@ -3688,6 +3894,11 @@ def execute_run(args: argparse.Namespace) -> dict[str, Any]:
         except Exception:
             config = None
     default_emulator = str((config or {}).get("pathEmu") or "ares")
+    multiplayer_config = (config or {}).get("multiplayer")
+    configured_rdram = multiplayer_config.get("targetRdramMB", 4) if isinstance(multiplayer_config, dict) else 4
+    rdram_mb = int(requested_rdram or configured_rdram or 4)
+    if rdram_mb not in {4, 8}:
+        rdram_mb = 4
     emulator_spec = args.emulator or default_emulator
     emulator_argv, emulator_issues = resolve_emulator_command(emulator_spec)
     if emulator_issues:
@@ -3705,16 +3916,20 @@ def execute_run(args: argparse.Namespace) -> dict[str, Any]:
         rom_path,
         homebrew_mode=profile_requested,
         emulator_version_text=version_text or "",
+        rdram_mb=rdram_mb,
     )
     result["run"]["emulator"] = emulator_spec
     result["run"]["argv"] = argv
+    result["run"]["rdram_mb"] = rdram_mb
+    run_env = os.environ.copy()
+    run_env["BF64_RDRAM_MB"] = str(rdram_mb)
     if profile_requested:
         result["profile"]["emulator_version"] = version_text
     started_at = time.perf_counter()
     try:
         if profile_requested:
             capture_timeout = args.timeout if args.timeout and args.timeout > 0 else 60
-            capture = execute_profile_emulator(argv, capture_timeout)
+            capture = execute_profile_emulator(argv, capture_timeout, run_env)
             result["run"]["executed"] = True
             result["run"]["returncode"] = capture["returncode"]
             result["run"]["duration_ms"] = capture["duration_ms"]
@@ -3774,6 +3989,7 @@ def execute_run(args: argparse.Namespace) -> dict[str, Any]:
                 errors="replace",
                 check=False,
                 timeout=args.timeout if args.timeout and args.timeout > 0 else None,
+                env=run_env,
             )
             result["run"]["executed"] = True
             result["run"]["returncode"] = proc.returncode
@@ -5369,6 +5585,13 @@ def parse_cli_int(value: str) -> int:
     return int(value, 0)
 
 
+def parse_cli_u8(value: str) -> int:
+    parsed = parse_cli_int(value)
+    if not 0 <= parsed <= 255:
+        raise argparse.ArgumentTypeError("expected an integer in 0..255")
+    return parsed
+
+
 def scene_object_records(doc: dict[str, Any]) -> list[tuple[dict[str, Any], dict[str, Any] | None, list[Any]]]:
     graph = doc.get("graph")
     if not isinstance(graph, dict):
@@ -5446,6 +5669,7 @@ def default_scene_object(name: str, object_uuid: int, position: list[float] | No
         "proportionalScale": False,
         "selectable": True,
         "enabled": True,
+        "viewMask": 31,
         "uuidPrefab": 0,
         "pos": position or [0.0, 0.0, 0.0],
         "rot": [0.0, 0.0, 0.0, 1.0],
@@ -5509,6 +5733,8 @@ def default_component_data(component_id: int, scene_doc: dict[str, Any]) -> dict
             "far": 4000.0,
             "aspect": 0.0,
             "mode": 1,
+            "target": 0,
+            "player": 0,
         },
         4: {"modelUUID": 0, "meshFilter": "", "maskRead": 0, "maskWrite": 0},
         5: {
@@ -5566,6 +5792,8 @@ def default_component_data(component_id: int, scene_doc: dict[str, Any]) -> dict
             "rolloff": 1.0,
             "pitch": 1.0,
         },
+        15: {"target": 0, "index": 0},
+        16: {"radius": 24.0, "yOffset": 1.0, "color": [0.04, 0.04, 0.06, 0.44], "layer": 1},
     }
     return json.loads(json.dumps(defaults[component_id]))
 
@@ -6493,6 +6721,44 @@ def cmd_scene_component_add(args: argparse.Namespace) -> int:
     issues.extend(type_issues)
     data_patch, data_issues = parse_json_object_argument(args.data, "component data")
     issues.extend(data_issues)
+    camera_target = getattr(args, "camera_target", None)
+    ui_target = getattr(args, "ui_target", None)
+    player_number = getattr(args, "player_number", None)
+    input_player_mask = getattr(args, "input_player_mask", None)
+    spawn_target = getattr(args, "spawn_target", None)
+    spawn_index = getattr(args, "spawn_index", None)
+    if camera_target is not None:
+        if component_id != 3:
+            issues.append(issue("error", "SCENE_CAMERA_OPTION", "--camera-target is only valid when attaching a Camera."))
+        else:
+            data_patch["target"] = {"manual": 0, "shared": 1, "player": 2}[camera_target]
+    if ui_target is not None:
+        if component_id != 13:
+            issues.append(issue("error", "SCENE_UI_OPTION", "--ui-target is only valid when attaching a UI document."))
+        else:
+            data_patch["displayTarget"] = {"shared": 0, "player": 1}[ui_target]
+    if player_number is not None:
+        if component_id == 3:
+            data_patch["player"] = player_number - 1
+        elif component_id == 13:
+            data_patch["displayPlayer"] = player_number - 1
+        else:
+            issues.append(issue("error", "SCENE_PLAYER_OPTION", "--player is only valid for Camera or UI attachments."))
+    if input_player_mask is not None:
+        if component_id != 13:
+            issues.append(issue("error", "SCENE_UI_OPTION", "--input-player-mask is only valid for UI attachments."))
+        elif input_player_mask not in range(0x11):
+            issues.append(issue("error", "SCENE_UI_OPTION", "--input-player-mask must be in 0..16."))
+        else:
+            data_patch["inputPlayerMask"] = input_player_mask
+    if spawn_target is not None or spawn_index is not None:
+        if component_id != 15:
+            issues.append(issue("error", "SCENE_SPAWN_OPTION", "--spawn-target and --spawn-index are only valid for Player Spawn attachments."))
+        else:
+            if spawn_target is not None:
+                data_patch["target"] = {"neutral": 0, "player": 1, "team": 2}[spawn_target]
+            if spawn_index is not None:
+                data_patch["index"] = spawn_index
     attachment: dict[str, Any] | None = None
     asset_ref = getattr(args, "asset", None)
     if asset_ref is not None and component_id is not None:
@@ -6784,6 +7050,8 @@ def cmd_scene_attach(args: argparse.Namespace) -> int:
         "audio3d": ("audio3d", "asset"),
         "positionalaudio": ("audio3d", "asset"),
         "code": ("code", "script"),
+        "playerspawn": ("playerspawn", None),
+        "spawn": ("playerspawn", None),
     }
     component_type, reference_kind = specs[kind]
     pre_issues: list[dict[str, str]] = []
@@ -9277,6 +9545,312 @@ def cmd_ui_validate(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def input_action_hash(name: str) -> int:
+    value = 2166136261
+    for byte in name.encode("utf-8"):
+        value ^= byte
+        value = (value * 16777619) & 0xFFFFFFFF
+    return value
+
+
+def input_cpp_identifier(name: str) -> str:
+    result = "".join(char if char.isascii() and char.isalnum() else "_" for char in name)
+    result = result or "unnamed"
+    return f"_{result}" if result[0].isdigit() else result
+
+
+def multiplayer_report(project_arg: str, command: str) -> tuple[dict[str, Any], Path | None]:
+    project_root, config_path, config, issues = resolve_project(project_arg)
+    scene_reports: list[dict[str, Any]] = []
+    if project_root is None or config_path is None or config is None:
+        return {
+            "schema": "bf64.multiplayer",
+            "version": 1,
+            "ok": False,
+            "command": command,
+            "project": project_arg,
+            "configuration": {},
+            "scenes": [],
+            "summary": {},
+            "issues": issues,
+        }, config_path
+
+    multiplayer = config.get("multiplayer", {})
+    if not isinstance(multiplayer, dict):
+        issues.append(issue("error", "MULTIPLAYER_CONFIG", "multiplayer must be an object."))
+        multiplayer = {}
+    controllers = multiplayer.get("controllers", [])
+    if not isinstance(controllers, list) or len(controllers) != 4:
+        issues.append(
+            issue(
+                "error",
+                "MULTIPLAYER_CONTROLLERS",
+                "Multiplayer projects must declare exactly four controller metadata entries.",
+                "Open the Multiplayer workspace or add multiplayer.controllers entries for physical ports 1-4.",
+            )
+        )
+        controllers = controllers if isinstance(controllers, list) else []
+    for index, controller in enumerate(controllers[:4]):
+        if not isinstance(controller, dict):
+            issues.append(issue("error", "MULTIPLAYER_CONTROLLER", f"Controller {index + 1} metadata must be an object."))
+            continue
+        if not isinstance(controller.get("name"), str) or not controller.get("name", "").strip():
+            issues.append(issue("error", "MULTIPLAYER_CONTROLLER", f"Controller {index + 1} requires a non-empty name."))
+        if not isinstance(controller.get("rumble"), bool):
+            issues.append(issue("error", "MULTIPLAYER_RUMBLE", f"Controller {index + 1} requires an explicit boolean rumble declaration."))
+    enabled_port_mask = multiplayer.get("enabledPortMask", 0x0F)
+    if not isinstance(enabled_port_mask, int) or not 1 <= enabled_port_mask <= 0x0F:
+        issues.append(issue("error", "MULTIPLAYER_PORT_MASK", "multiplayer.enabledPortMask must enable at least one physical port in the low four bits."))
+        enabled_port_mask = 0x0F
+    host_port = multiplayer.get("hostPort", 0)
+    if not isinstance(host_port, int) or not 0 <= host_port < 4:
+        issues.append(issue("error", "MULTIPLAYER_HOST_PORT", "multiplayer.hostPort must be a zero-based physical port in 0..3."))
+        host_port = 0
+    elif not enabled_port_mask & (1 << host_port):
+        issues.append(issue("error", "MULTIPLAYER_HOST_PORT", "multiplayer.hostPort must refer to an enabled physical port."))
+
+    input_conf = config.get("input", {})
+    if not isinstance(input_conf, dict):
+        issues.append(issue("error", "INPUT_CONFIG", "input must be an object."))
+        input_conf = {}
+    dead_zone = input_conf.get("deadZone", 0.18)
+    if not isinstance(dead_zone, (int, float)) or not 0 <= float(dead_zone) < 1:
+        issues.append(issue("error", "INPUT_DEAD_ZONE", "input.deadZone must be in [0, 1)."))
+    actions = input_conf.get("actions", [])
+    axes = input_conf.get("axes", [])
+    if not isinstance(actions, list):
+        issues.append(issue("error", "INPUT_ACTIONS", "input.actions must be an array."))
+        actions = []
+    if not isinstance(axes, list):
+        issues.append(issue("error", "INPUT_AXES", "input.axes must be an array."))
+        axes = []
+    if len(actions) > 32:
+        issues.append(issue("error", "INPUT_ACTION_LIMIT", f"Input map defines {len(actions)} actions; maximum is 32."))
+    if len(axes) > 8:
+        issues.append(issue("error", "INPUT_AXIS_LIMIT", f"Input map defines {len(axes)} axes; maximum is 8."))
+    hashes: dict[int, str] = {}
+    identifiers: dict[str, str] = {}
+    action_names: set[str] = set()
+    axis_names: set[str] = set()
+    for action_index, action in enumerate(actions):
+        if not isinstance(action, dict):
+            issues.append(issue("error", "INPUT_ACTION", f"Action {action_index} must be an object."))
+            continue
+        name = action.get("name")
+        if not isinstance(name, str) or not name:
+            issues.append(issue("error", "INPUT_ACTION_NAME", f"Action {action_index} requires a non-empty name."))
+            continue
+        if name in action_names:
+            issues.append(issue("error", "INPUT_ACTION_NAME", f"Input action '{name}' is declared more than once."))
+        action_names.add(name)
+        hashed = input_action_hash(name)
+        if hashed in hashes and hashes[hashed] != name:
+            issues.append(issue("error", "INPUT_HASH_COLLISION", f"Actions '{hashes[hashed]}' and '{name}' hash to 0x{hashed:08X}."))
+        hashes[hashed] = name
+        cpp_name = input_cpp_identifier(name)
+        if cpp_name in identifiers and identifiers[cpp_name] != name:
+            issues.append(issue("error", "INPUT_IDENTIFIER_COLLISION", f"Inputs '{identifiers[cpp_name]}' and '{name}' generate the same C++ identifier '{cpp_name}'."))
+        identifiers[cpp_name] = name
+        bindings = action.get("bindings", [])
+        if not isinstance(bindings, list) or not 1 <= len(bindings) <= 4:
+            issues.append(issue("error", "INPUT_BINDINGS", f"Action '{name}' requires one to four bindings."))
+            continue
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                issues.append(issue("error", "INPUT_BINDING", f"Action '{name}' has a non-object binding."))
+                continue
+            buttons = binding.get("buttons", 0)
+            chord = binding.get("chord", 0)
+            if not isinstance(buttons, int) or not 1 <= buttons <= 0xFFFF:
+                issues.append(issue("error", "INPUT_BINDING", f"Action '{name}' binding buttons must be a non-zero 16-bit mask."))
+            if not isinstance(chord, int) or not 0 <= chord <= 0xFFFF:
+                issues.append(issue("error", "INPUT_BINDING", f"Action '{name}' chord must be a 16-bit mask."))
+
+    valid_sources = {"none", "stick_x", "stick_y", "dpad_x", "dpad_y", "c_x", "c_y"}
+    for axis_index, axis in enumerate(axes):
+        if not isinstance(axis, dict):
+            issues.append(issue("error", "INPUT_AXIS", f"Axis {axis_index} must be an object."))
+            continue
+        name = axis.get("name")
+        if not isinstance(name, str) or not name:
+            issues.append(issue("error", "INPUT_AXIS_NAME", f"Axis {axis_index} requires a non-empty name."))
+            continue
+        if name in axis_names:
+            issues.append(issue("error", "INPUT_AXIS_NAME", f"Input axis '{name}' is declared more than once."))
+        axis_names.add(name)
+        hashed = input_action_hash(name)
+        if hashed in hashes and hashes[hashed] != name:
+            issues.append(issue("error", "INPUT_HASH_COLLISION", f"Inputs '{hashes[hashed]}' and '{name}' hash to 0x{hashed:08X}."))
+        hashes[hashed] = name
+        cpp_name = input_cpp_identifier(name)
+        if cpp_name in identifiers and identifiers[cpp_name] != name:
+            issues.append(issue("error", "INPUT_IDENTIFIER_COLLISION", f"Inputs '{identifiers[cpp_name]}' and '{name}' generate the same C++ identifier '{cpp_name}'."))
+        identifiers[cpp_name] = name
+        bindings = axis.get("bindings", [])
+        if not isinstance(bindings, list) or not 1 <= len(bindings) <= 4:
+            issues.append(issue("error", "INPUT_AXIS_BINDINGS", f"Axis '{name}' requires one to four bindings."))
+            continue
+        for binding in bindings:
+            source = binding.get("source") if isinstance(binding, dict) else None
+            if source not in valid_sources or source == "none":
+                issues.append(issue("error", "INPUT_AXIS_SOURCE", f"Axis '{name}' has invalid source '{source}'."))
+            scale = binding.get("scale", 1) if isinstance(binding, dict) else None
+            zone = binding.get("deadZone", 0) if isinstance(binding, dict) else None
+            if not isinstance(scale, (int, float)) or not -1 <= float(scale) <= 1:
+                issues.append(issue("error", "INPUT_AXIS_SCALE", f"Axis '{name}' scale must be in [-1, 1]."))
+            if not isinstance(zone, (int, float)) or not 0 <= float(zone) < 1:
+                issues.append(issue("error", "INPUT_DEAD_ZONE", f"Axis '{name}' dead zone must be in [0, 1)."))
+
+    target_rdram = multiplayer.get("targetRdramMB", 4)
+    if target_rdram not in {4, 8}:
+        issues.append(issue("error", "MULTIPLAYER_RDRAM", "multiplayer.targetRdramMB must be 4 or 8."))
+        target_rdram = 4
+
+    scene_files, scene_file_issues = iter_scene_files(project_root)
+    issues.extend(scene_file_issues)
+    for scene_id, scene_path in scene_files:
+        try:
+            doc = read_json_file(scene_path)
+        except Exception as exc:  # noqa: BLE001
+            issues.append(issue("error", "MULTIPLAYER_SCENE", f"Could not read {scene_path}: {exc}."))
+            continue
+        if not isinstance(doc, dict):
+            continue
+        conf = doc.get("conf", {}) if isinstance(doc.get("conf"), dict) else {}
+        width = optional_int(conf.get("fbWidth")) or 320
+        height = optional_int(conf.get("fbHeight")) or 240
+        if optional_int(conf.get("renderPipeline")) == 2 and target_rdram == 4:
+            issues.append(issue("error", "MULTIPLAYER_MEMORY", f"Scene {scene_id} uses BigTex but the project targets 4 MB RDRAM."))
+        player_cameras = [0, 0, 0, 0]
+        player_huds = [0, 0, 0, 0]
+        player_spawns = [0, 0, 0, 0]
+        neutral_spawns = 0
+        team_spawns = 0
+        shared_cameras = 0
+        manual_rects: list[tuple[str, int, int, int, int]] = []
+        for obj, _parent, _siblings in scene_object_records(doc):
+            view_mask = obj.get("viewMask", 0x1F)
+            if not isinstance(view_mask, int) or not 0 <= view_mask <= 0x1F:
+                issues.append(issue("error", "MULTIPLAYER_VIEW_MASK", f"Scene {scene_id} object '{obj.get('name')}' has invalid viewMask {view_mask}."))
+            for component in obj.get("components", []):
+                if not isinstance(component, dict):
+                    continue
+                component_id = optional_int(component.get("id"))
+                data = component.get("data", {}) if isinstance(component.get("data"), dict) else {}
+                if component_id == 3:
+                    target = optional_int(data.get("target")) or 0
+                    player = optional_int(data.get("player")) or 0
+                    if target not in {0, 1, 2}:
+                        issues.append(issue("error", "MULTIPLAYER_CAMERA_TARGET", f"Scene {scene_id} camera '{obj.get('name')}' has invalid target {target}."))
+                    if target == 1:
+                        shared_cameras += 1
+                    elif target == 2:
+                        if 0 <= player < 4:
+                            player_cameras[player] += 1
+                        else:
+                            issues.append(issue("error", "MULTIPLAYER_CAMERA_PLAYER", f"Scene {scene_id} camera targets invalid player {player}."))
+                    else:
+                        offset = data.get("vpOffset", [0, 0])
+                        size = data.get("vpSize", [width, height])
+                        if isinstance(offset, list) and len(offset) == 2 and isinstance(size, list) and len(size) == 2:
+                            x, y, w, h = map(int, [offset[0], offset[1], size[0], size[1]])
+                            if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > width or y + h > height:
+                                issues.append(issue("error", "MULTIPLAYER_CAMERA_BOUNDS", f"Scene {scene_id} camera '{obj.get('name')}' is outside {width}x{height}."))
+                            manual_rects.append((str(obj.get("name", "Camera")), x, y, w, h))
+                elif component_id == 13:
+                    target = optional_int(data.get("displayTarget")) or 0
+                    player = optional_int(data.get("displayPlayer")) or 0
+                    raw_input_mask = optional_int(data.get("inputPlayerMask"))
+                    input_mask = 1 if raw_input_mask is None else raw_input_mask
+                    if target == 1:
+                        if 0 <= player < 4:
+                            player_huds[player] += 1
+                            accepts_player = bool(input_mask & (1 << player)) or (input_mask == 0x10 and player == host_port)
+                            if not accepts_player:
+                                issues.append(issue("error", "MULTIPLAYER_HUD_OWNER", f"Scene {scene_id} player {player + 1} HUD does not accept its player's input."))
+                        else:
+                            issues.append(issue("error", "MULTIPLAYER_HUD_PLAYER", f"Scene {scene_id} HUD targets invalid player {player}."))
+                    if input_mask not in range(0x10) and input_mask != 0x10:
+                        issues.append(issue("error", "MULTIPLAYER_HUD_INPUT", f"Scene {scene_id} HUD inputPlayerMask must be 0..15 or the host mask 16."))
+                elif component_id == 15:
+                    target = optional_int(data.get("target")) or 0
+                    index = optional_int(data.get("index")) or 0
+                    if target not in {0, 1, 2} or not 0 <= index <= 255 or (target == 1 and index >= 4):
+                        issues.append(issue("error", "MULTIPLAYER_SPAWN", f"Scene {scene_id} has invalid Player Spawn data."))
+                    if target == 1 and 0 <= index < 4:
+                        player_spawns[index] += 1
+                    elif target == 0:
+                        neutral_spawns += 1
+                    elif target == 2:
+                        team_spawns += 1
+        for left in range(len(manual_rects)):
+            name_a, ax, ay, aw, ah = manual_rects[left]
+            for right in range(left + 1, len(manual_rects)):
+                name_b, bx, by, bw, bh = manual_rects[right]
+                if ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah:
+                    issues.append(issue("error", "MULTIPLAYER_CAMERA_OVERLAP", f"Scene {scene_id} manual cameras '{name_a}' and '{name_b}' overlap."))
+        if any(player_cameras):
+            for player, count in enumerate(player_cameras):
+                if count == 0:
+                    issues.append(issue("error", "MULTIPLAYER_CAMERA_MISSING", f"Scene {scene_id} is missing the player {player + 1} camera target."))
+                elif count > 1:
+                    issues.append(issue("error", "MULTIPLAYER_CAMERA_DUPLICATE", f"Scene {scene_id} has {count} player {player + 1} camera targets."))
+        if shared_cameras > 1:
+            issues.append(issue("error", "MULTIPLAYER_CAMERA_DUPLICATE", f"Scene {scene_id} has duplicate shared cameras."))
+        for player, count in enumerate(player_huds):
+            if any(player_huds) and count == 0:
+                issues.append(issue("error", "MULTIPLAYER_HUD_MISSING", f"Scene {scene_id} is missing the player {player + 1} HUD target."))
+            if count > 1:
+                issues.append(issue("error", "MULTIPLAYER_HUD_DUPLICATE", f"Scene {scene_id} has duplicate player {player + 1} HUDs."))
+        if neutral_spawns + team_spawns + sum(player_spawns) > 0 and neutral_spawns == 0 and team_spawns == 0:
+            for player, count in enumerate(player_spawns):
+                if count == 0:
+                    issues.append(issue("error", "MULTIPLAYER_SPAWN_MISSING", f"Scene {scene_id} has no spawn available for player {player + 1}."))
+        scene_reports.append({
+            "id": scene_id,
+            "path": str(scene_path),
+            "framebuffer": {"width": width, "height": height},
+            "cameras": {"players": player_cameras, "shared": shared_cameras, "manual": len(manual_rects)},
+            "huds": {"players": player_huds},
+            "spawns": {"players": player_spawns, "neutral": neutral_spawns, "team": team_spawns},
+        })
+
+    error_count = sum(1 for item in issues if item.get("severity") == "error")
+    warning_count = sum(1 for item in issues if item.get("severity") == "warning")
+    report = {
+        "schema": "bf64.multiplayer",
+        "version": 1,
+        "ok": error_count == 0,
+        "command": command,
+        "project": project_summary(project_root, config_path, config),
+        "configuration": {
+            "controllers": controllers,
+            "input": {"dead_zone": dead_zone, "action_count": len(actions), "axis_count": len(axes)},
+            "enabled_port_mask": enabled_port_mask,
+            "host_port": host_port,
+            "target_rdram_mb": target_rdram,
+        },
+        "scenes": scene_reports,
+        "summary": {"scene_count": len(scene_reports), "errors": error_count, "warnings": warning_count},
+        "issues": issues,
+    }
+    return report, config_path
+
+
+def cmd_multiplayer(args: argparse.Namespace) -> int:
+    command = f"multiplayer {args.multiplayer_command}"
+    result, config_path = multiplayer_report(args.project, command)
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        output_result(result, False)
+        summary = result.get("summary", {})
+        print(f"Multiplayer: scenes={summary.get('scene_count', 0)} errors={summary.get('errors', 0)} warnings={summary.get('warnings', 0)}")
+    exit_code = 0 if result.get("ok") else 1
+    record_if_requested(args, result, exit_code, config_path)
+    return exit_code
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bf64", description="Agent-first BF64 utility surface")
     parser.add_argument("--version", action="version", version=f"%(prog)s {CLI_VERSION}")
@@ -9326,7 +9900,7 @@ def build_parser() -> argparse.ArgumentParser:
     toolchain_install.set_defaults(func=cmd_toolchain_install)
 
     constraints = sub.add_parser("constraints", help="Query machine-readable N64/BF64 limits")
-    constraints.add_argument("topic", nargs="?", default="list", help="list, texture, model, audio, scene, rom, or exit_codes")
+    constraints.add_argument("topic", nargs="?", default="list", help="list, texture, model, audio, scene, multiplayer, rom, or exit_codes")
     constraints.add_argument("--json", action="store_true", help="Emit stable JSON")
     constraints.set_defaults(func=cmd_constraints)
 
@@ -9361,8 +9935,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--timeout", type=int, default=0, help="Optional emulator timeout in seconds; 0 means no timeout")
     run.add_argument("--build-timeout", type=int, default=0, help="Optional --build timeout in seconds; 0 means no timeout")
     run.add_argument("--profile", action="store_true", help="Capture a bounded structured runtime profile and stop the emulator")
-    run.add_argument("--profile-warmup", type=int, default=120, help="Frames to discard before profiling (0..65535)")
-    run.add_argument("--profile-frames", type=int, default=300, help="Frames to sample (1..2048)")
+    run.add_argument("--profile-warmup", type=int, default=180, help="Frames to discard before profiling (0..65535)")
+    run.add_argument("--profile-frames", type=int, default=600, help="Frames to sample (1..2048)")
+    run.add_argument("--rdram", type=int, choices=(4, 8), help="Emulate 4 MB base RDRAM or 8 MB with Expansion Pak")
     run.add_argument("--profile-output", help="Profile JSON artifact path; defaults under <project>/.bf64/profiles")
     run.add_argument("--json", action="store_true", help="Emit stable JSON")
     run.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
@@ -9657,7 +10232,7 @@ def build_parser() -> argparse.ArgumentParser:
     prefab_attach = prefab_sub.add_parser("attach", help="Attach a camera/model/collision/light/UI/Code adapter")
     prefab_attach.add_argument(
         "kind",
-        choices=("ui", "camera", "model", "collision", "collision-mesh", "collider", "light", "audio3d", "code"),
+        choices=("ui", "camera", "model", "collision", "collision-mesh", "collider", "light", "audio3d", "code", "player-spawn", "spawn"),
         help="Adapter kind",
     )
     prefab_attach.add_argument("prefab", help="Prefab to mutate")
@@ -9908,6 +10483,16 @@ def build_parser() -> argparse.ArgumentParser:
     project_status.add_argument("--history-path", help="Override operation history JSONL path for --record")
     project_status.set_defaults(func=cmd_project_status)
 
+    multiplayer = sub.add_parser("multiplayer", help="Inspect and validate local multiplayer configuration")
+    multiplayer_sub = multiplayer.add_subparsers(dest="multiplayer_command", required=True)
+    for command_name in ("status", "validate"):
+        multiplayer_command = multiplayer_sub.add_parser(command_name, help=f"{command_name.title()} multiplayer configuration and scenes")
+        multiplayer_command.add_argument("--project", default=".", help="Project directory or project.p64proj path")
+        multiplayer_command.add_argument("--json", action="store_true", help="Emit stable JSON")
+        multiplayer_command.add_argument("--record", action="store_true", help="Append result to .bf64/operations.jsonl")
+        multiplayer_command.add_argument("--history-path", help="Override operation history JSONL path for --record")
+        multiplayer_command.set_defaults(func=cmd_multiplayer)
+
     asset = sub.add_parser("asset", help="Read and validate project assets")
     asset_sub = asset.add_subparsers(dest="asset_command", required=True)
     asset_ls = asset_sub.add_parser("ls", help="List assets in a BF64 project")
@@ -10143,7 +10728,7 @@ def build_parser() -> argparse.ArgumentParser:
     scene_attach = scene_sub.add_parser("attach", help="Attach an ergonomic camera/model/collision/light/UI adapter")
     scene_attach.add_argument(
         "kind",
-        choices=("ui", "camera", "model", "collision", "collision-mesh", "collider", "light", "audio3d", "code"),
+        choices=("ui", "camera", "model", "collision", "collision-mesh", "collider", "light", "audio3d", "code", "player-spawn", "spawn"),
         help="Adapter kind",
     )
     scene_attach.add_argument("scene", help="Scene id or exact name")
@@ -10152,6 +10737,12 @@ def build_parser() -> argparse.ArgumentParser:
     scene_attach.add_argument("--uuid", type=parse_cli_int, help="Explicit 64-bit component UUID")
     scene_attach.add_argument("--name", help="Component display name override")
     scene_attach.add_argument("--data", help="JSON object or @file merged over editor-compatible defaults")
+    scene_attach.add_argument("--camera-target", choices=("manual", "shared", "player"), help="Camera display assignment")
+    scene_attach.add_argument("--ui-target", choices=("shared", "player"), help="UI display assignment")
+    scene_attach.add_argument("--player", dest="player_number", type=int, choices=range(1, 5), help="One-based Camera/UI player assignment")
+    scene_attach.add_argument("--input-player-mask", type=parse_cli_int, help="UI owner bitmask 0..15, or 16 for the host port")
+    scene_attach.add_argument("--spawn-target", choices=("neutral", "player", "team"), help="Player Spawn assignment")
+    scene_attach.add_argument("--spawn-index", type=parse_cli_u8, help="Zero-based player/team index in 0..255")
     scene_attach.add_argument("--args", dest="script_args", help="Code argument JSON object or @file")
     scene_attach.add_argument("--project", default=".", help="Project directory or project.p64proj path")
     scene_attach.add_argument("--dry-run", action="store_true", help="Validate and report changes without writing")

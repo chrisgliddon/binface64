@@ -14,6 +14,7 @@
 #include "systems/sprites.h"
 #include "script/nodeGraph.h"
 #include "debug/debugMenu.h"
+#include "input/input.h"
 
 namespace P64::User
 {
@@ -102,7 +103,7 @@ namespace P64::GlobalScript::C4F4D286D6CBAAAA
 
   void onSceneUpdate()
   {
-    /*auto held = joypad_get_buttons_held(JOYPAD_PORT_1);
+    /*auto held = Input::rawButtonsHeld(0);
     for(uint32_t y = 0; y < ditherDim; ++y)
     {
       for(uint32_t x = 0; x < ditherDim; ++x)

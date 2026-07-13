@@ -23,6 +23,7 @@ src += $(wildcard src/renderer/hdr/*.cpp) $(wildcard src/renderer/bigtex/*.cpp)
 src += $(wildcard src/renderer/particles/*.cpp) $(wildcard src/script/*.cpp)
 src += $(wildcard src/libdragon/*.cpp) $(wildcard src/save/*.cpp)
 src += $(wildcard src/ui/*.cpp)
+src += $(wildcard src/input/*.cpp) $(wildcard src/multiplayer/*.cpp)
 csrc = $(wildcard src/save/*.c)
 
 # HDR / Bloom ucode

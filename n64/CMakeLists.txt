@@ -33,6 +33,17 @@ add_executable(n64_engine
         engine/src/scene/camera.cpp
         engine/src/scene/sceneManager.cpp
 
+        engine/include/input/input.h
+        engine/src/input/input.cpp
+        engine/include/multiplayer/session.h
+        engine/src/multiplayer/session.cpp
+        engine/include/multiplayer/viewports.h
+        engine/src/multiplayer/viewports.cpp
+        engine/include/multiplayer/spawns.h
+        engine/src/multiplayer/spawns.cpp
+        engine/include/multiplayer/groupCamera.h
+        engine/src/multiplayer/groupCamera.cpp
+
         engine/src/audio/audioManager.cpp
         engine/include/audio/spatialAudio.h
         engine/src/audio/spatialAudio.cpp
@@ -102,6 +113,10 @@ add_executable(n64_engine
         engine/src/renderer/material.cpp
         engine/src/scene/components/animModel.cpp
         engine/include/scene/components/ui.h
+        engine/include/scene/components/playerSpawn.h
+        engine/src/scene/components/playerSpawn.cpp
+        engine/include/scene/components/blobShadow.h
+        engine/src/scene/components/blobShadow.cpp
         engine/include/ui/documentFormat.h
         engine/include/ui/dialogue.h
         engine/include/ui/utf8.h

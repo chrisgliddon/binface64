@@ -1,6 +1,7 @@
 #include "script/userScript.h"
 #include "scene/sceneManager.h"
 #include "scene/components/light.h"
+#include "input/input.h"
 
 namespace P64::Script::CEC77FAB51D7B753
 {
@@ -16,7 +17,7 @@ namespace P64::Script::CEC77FAB51D7B753
 
   void update(Object& obj, Data *data, float deltaTime)
   {
-    auto held = joypad_get_buttons_held(JOYPAD_PORT_1);
+    auto held = Input::rawButtonsHeld(0);
     auto light = obj.getComponent<Comp::Light>();
 
     constexpr float moveSpeed = 8.0f;

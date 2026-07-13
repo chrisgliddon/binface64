@@ -17,7 +17,8 @@ namespace
   constexpr uint8_t FLAG_XM = 1 << 0;
   constexpr uint8_t FLAG_SPATIAL = 1 << 1;
   constinit uint16_t nextUUID{1};
-  P64::Audio::Spatial::Listener listener{};
+  std::array<P64::Audio::Spatial::Listener, 4> listeners{};
+  uint8_t listenerCount{1};
 
   struct Slot
   {
@@ -69,7 +70,9 @@ namespace
       float left = slot.volume * P64::AudioManager::masterVol;
       float right = left;
       if(slot.isSpatial()) {
-        const auto mix = P64::Audio::Spatial::calculate(slot.position, listener, slot.spatialSettings);
+        const auto mix = P64::Audio::Spatial::calculateStrongest(
+          slot.position, listeners.data(), listenerCount, slot.spatialSettings
+        );
         left *= mix.left;
         right *= mix.right;
       }
@@ -120,17 +123,40 @@ namespace P64::AudioManager
 
   void setListener(const fm_vec3_t &position, const fm_vec3_t &forward, const fm_vec3_t &up)
   {
-    listener = {
+    listeners[0] = {
       .position = toSpatial(position),
       .forward = toSpatial(forward),
       .up = toSpatial(up),
     };
+    listenerCount = 1;
   }
 
   void setListener(const Camera &camera)
   {
     setListener(camera.getPos(), camera.getViewDir(), camera.getUp());
   }
+
+  void clearListeners()
+  {
+    listeners = {};
+    listenerCount = 0;
+  }
+
+  bool addListener(const fm_vec3_t &position, const fm_vec3_t &forward, const fm_vec3_t &up)
+  {
+    if(listenerCount >= listeners.size())return false;
+    listeners[listenerCount++] = {
+      .position = toSpatial(position), .forward = toSpatial(forward), .up = toSpatial(up)
+    };
+    return true;
+  }
+
+  bool addListener(const Camera &camera)
+  {
+    return addListener(camera.getPos(), camera.getViewDir(), camera.getUp());
+  }
+
+  uint8_t getListenerCount() { return listenerCount; }
 
   void init(int freq)
   {
@@ -147,7 +173,8 @@ namespace P64::AudioManager
       audio_init(freq, 3);
       mixer_init(CHANNEL_COUNT);
       slots = {};
-      listener = {};
+      listeners = {};
+      listenerCount = 1;
       lastFreq = freq;
     }
   }

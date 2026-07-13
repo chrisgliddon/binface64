@@ -30,6 +30,8 @@ namespace P64::Comp
       float far;
       float aspectRatio;
       Mode mode;
+      P64::Camera::Target target;
+      uint8_t player;
     };
 
     P64::Camera camera{};

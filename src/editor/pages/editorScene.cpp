@@ -548,6 +548,13 @@ void Editor::Scene::draw()
 
   drawFocusWorkspace(dockSpaceID);
 
+  if(activeWorkspace == Workspace::MULTIPLAYER) {
+    ImGui::SetNextWindowDockID(dockSpaceID, ImGuiCond_FirstUseEver);
+    ImGui::Begin(ICON_MDI_GAMEPAD " Multiplayer Workspace");
+    multiplayerWorkspace.draw();
+    ImGui::End();
+  }
+
   ImGui::Begin("Object");
     objectInspector.draw();
   ImGui::End();
@@ -693,6 +700,12 @@ void Editor::Scene::draw()
           activeWorkspace = Workspace::SCENE;
           activeFocusArea.clear();
           ImGui::makeTabVisible("3D-Viewport");
+        }
+        const bool multiplayerActive = activeWorkspace == Workspace::MULTIPLAYER;
+        if(ImGui::MenuItem(ICON_MDI_GAMEPAD " Multiplayer", nullptr, multiplayerActive)) {
+          activeWorkspace = Workspace::MULTIPLAYER;
+          activeFocusArea.clear();
+          saveSession();
         }
         for(const auto &area : focusCatalog.value("areas", nlohmann::json::array())) {
           auto id = area.value("id", std::string{});

@@ -253,6 +253,25 @@ bool Editor::ProjectSettings::draw()
     drawAssetExclusions();
   }
 
+  if (ImGui::CollapsingHeader("Local Multiplayer", ImGuiTreeNodeFlags_DefaultOpen)) {
+    auto &multiplayer = ctx.project->conf.multiplayer;
+    ImTable::start("LocalMultiplayer");
+    for(std::uint8_t port=0; port<4; ++port) {
+      bool enabled = (multiplayer.enabledPortMask & (1u << port)) != 0;
+      ImTable::addCheckBox("Enable Port " + std::to_string(port + 1), enabled);
+      if(enabled)multiplayer.enabledPortMask |= 1u << port;
+      else multiplayer.enabledPortMask &= ~(1u << port);
+      ImTable::add("Player " + std::to_string(port + 1) + " Name", multiplayer.controllers[port].name);
+      ImTable::addCheckBox("Player " + std::to_string(port + 1) + " Rumble", multiplayer.controllers[port].rumble);
+    }
+    int hostPort = multiplayer.hostPort;
+    ImTable::addComboBox("Host Port", hostPort, {"Port 1", "Port 2", "Port 3", "Port 4"});
+    multiplayer.hostPort = static_cast<std::uint8_t>(std::clamp(hostPort, 0, 3));
+    multiplayer.targetRdramMB = std::clamp(multiplayer.targetRdramMB, 4, 8);
+    ImTable::add("Target RDRAM (MB)", multiplayer.targetRdramMB);
+    ImTable::end();
+  }
+
   if (ImGui::CollapsingHeader("ROM Header")) {
     drawRomHeader();
   }

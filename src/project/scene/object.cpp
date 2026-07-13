@@ -25,6 +25,7 @@ namespace
     builder.set("proportionalScale", obj.proportionalScale);
     builder.set("selectable", obj.selectable);
     builder.set("enabled", obj.enabled);
+    builder.set("viewMask", obj.viewMask);
 
     builder
       .set(obj.uuidPrefab)
@@ -114,6 +115,7 @@ void Project::Object::deserialize(Scene *scene, nlohmann::json &doc)
   proportionalScale = doc.value("proportionalScale", false);
   selectable = doc.value("selectable", true);
   enabled = doc.value("enabled", true);
+  viewMask = static_cast<std::uint8_t>(doc.value("viewMask", 0x1F)) & 0x1F;
 
   Utils::JSON::readProp(doc, uuidPrefab);
   Utils::JSON::readProp(doc, pos);

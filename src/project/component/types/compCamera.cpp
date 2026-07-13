@@ -3,6 +3,7 @@
 * @license MIT
 */
 #include "../components.h"
+#include <algorithm>
 #include "../../../context.h"
 #include "../../../editor/imgui/helper.h"
 #include "../../../utils/json.h"
@@ -30,6 +31,8 @@ namespace Project::Component::Camera
     PROP_FLOAT(far);
     PROP_FLOAT(aspect);
     PROP_S32(mode);
+    PROP_S32(target);
+    PROP_U32(player);
   };
 
   std::shared_ptr<void> init(Object &obj) {
@@ -56,6 +59,8 @@ namespace Project::Component::Camera
       .set(data.far)
       .set(data.aspect)
       .set(data.mode)
+      .set(data.target)
+      .set(data.player)
       .doc;
   }
 
@@ -68,6 +73,8 @@ namespace Project::Component::Camera
     Utils::JSON::readProp(doc, data->far, 4000.0f);
     Utils::JSON::readProp(doc, data->aspect, 0.0f);
     Utils::JSON::readProp(doc, data->mode, 0);
+    Utils::JSON::readProp(doc, data->target, 0);
+    Utils::JSON::readProp(doc, data->player, 0u);
     return data;
   }
 
@@ -81,7 +88,9 @@ namespace Project::Component::Camera
     ctx.fileObj.write<float>(data.near.resolve(obj));
     ctx.fileObj.write<float>(data.far.resolve(obj));
     ctx.fileObj.write<float>(data.aspect.resolve(obj));
-    ctx.fileObj.write<uint8_t>(data.mode.resolve(obj));
+    ctx.fileObj.write<uint8_t>(static_cast<std::uint8_t>(std::clamp(data.mode.resolve(obj), 0, 1)));
+    ctx.fileObj.write<uint8_t>(static_cast<std::uint8_t>(std::clamp(data.target.resolve(obj), 0, 2)));
+    ctx.fileObj.write<uint8_t>(std::min<std::uint32_t>(data.player.resolve(obj), 3));
   }
 
   void update(Object &obj, Entry &entry)
@@ -112,6 +121,10 @@ namespace Project::Component::Camera
       ImTable::addComboBox("Controlled", data.mode.resolve(obj), {
         "Manually", "By Object"
       });
+      ImTable::addComboBox("Display Target", data.target.resolve(obj), {
+        "Manual Viewport", "Shared Camera", "Player Camera"
+      });
+      if(data.target.resolve(obj) == 2)ImTable::addObjProp("Player (0-3)", data.player);
 
       ImTable::addObjProp("Offset", data.vpOffset);
       ImTable::addObjProp("Size", data.vpSize);

@@ -4,6 +4,7 @@
 */
 #include "project.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -120,6 +121,77 @@ namespace
     }
     if (m.langs.empty()) m.langs.push_back(Project::MetaLang{}); // always keep a default entry
   }
+
+  nlohmann::json inputToJson(const Project::InputConf &input) {
+    auto actions = nlohmann::json::array();
+    for(const auto &action : input.actions) {
+      auto bindings = nlohmann::json::array();
+      for(const auto &binding : action.bindings)bindings.push_back({
+        {"buttons", binding.buttons}, {"chord", binding.chord}
+      });
+      actions.push_back({{"name", action.name}, {"bindings", bindings}});
+    }
+    auto axes = nlohmann::json::array();
+    for(const auto &axis : input.axes) {
+      auto bindings = nlohmann::json::array();
+      for(const auto &binding : axis.bindings)bindings.push_back({
+        {"source", binding.source}, {"scale", binding.scale}, {"deadZone", binding.deadZone}
+      });
+      axes.push_back({{"name", axis.name}, {"bindings", bindings}});
+    }
+    return {{"deadZone", input.deadZone}, {"actions", actions}, {"axes", axes}};
+  }
+
+  void inputFromJson(const nlohmann::json &j, Project::InputConf &input) {
+    input = {};
+    input.deadZone = j.value("deadZone", 0.18f);
+    for(const auto &item : j.value("actions", nlohmann::json::array())) {
+      Project::InputAction action{};
+      action.name = item.value("name", "");
+      for(const auto &binding : item.value("bindings", nlohmann::json::array())) {
+        action.bindings.push_back({
+          static_cast<std::uint16_t>(binding.value("buttons", 0u)),
+          static_cast<std::uint16_t>(binding.value("chord", 0u))
+        });
+      }
+      input.actions.push_back(std::move(action));
+    }
+    for(const auto &item : j.value("axes", nlohmann::json::array())) {
+      Project::InputAxis axis{};
+      axis.name = item.value("name", "");
+      for(const auto &binding : item.value("bindings", nlohmann::json::array())) {
+        axis.bindings.push_back({
+          binding.value("source", "none"), binding.value("scale", 1.0f), binding.value("deadZone", 0.0f)
+        });
+      }
+      input.axes.push_back(std::move(axis));
+    }
+  }
+
+  nlohmann::json multiplayerToJson(const Project::MultiplayerConf &multiplayer) {
+    auto controllers = nlohmann::json::array();
+    for(const auto &controller : multiplayer.controllers)controllers.push_back({
+      {"name", controller.name}, {"rumble", controller.rumble}
+    });
+    return {
+      {"controllers", controllers},
+      {"enabledPortMask", multiplayer.enabledPortMask},
+      {"hostPort", multiplayer.hostPort},
+      {"targetRdramMB", multiplayer.targetRdramMB}
+    };
+  }
+
+  void multiplayerFromJson(const nlohmann::json &j, Project::MultiplayerConf &multiplayer) {
+    multiplayer = {};
+    const auto controllers = j.value("controllers", nlohmann::json::array());
+    for(std::size_t index=0; index<multiplayer.controllers.size() && index<controllers.size(); ++index) {
+      multiplayer.controllers[index].name = controllers[index].value("name", "Player " + std::to_string(index+1));
+      multiplayer.controllers[index].rumble = controllers[index].value("rumble", true);
+    }
+    multiplayer.enabledPortMask = static_cast<std::uint8_t>(j.value("enabledPortMask", 0x0F) & 0x0F);
+    multiplayer.hostPort = static_cast<std::uint8_t>(std::clamp(j.value("hostPort", 0), 0, 3));
+    multiplayer.targetRdramMB = j.value("targetRdramMB", 4);
+  }
 }
 
 std::string Project::ProjectConf::serialize() const {
@@ -131,6 +203,8 @@ std::string Project::ProjectConf::serialize() const {
     .set("editorVersion", editorVersion)
     .set("romHeader", romHeaderToJson(romHeader))
     .set("metadata", metadataToJson(metadata))
+    .set("input", inputToJson(input))
+    .set("multiplayer", multiplayerToJson(multiplayer))
     .set("sceneIdOnBoot", sceneIdOnBoot)
     .set("sceneIdOnReset", sceneIdOnReset)
     .set("sceneIdLastOpened", sceneIdLastOpened)
@@ -155,6 +229,8 @@ void Project::Project::deserialize(const nlohmann::json &doc) {
   conf.editorVersion = doc.value("editorVersion", "");
   romHeaderFromJson(doc.value("romHeader", nlohmann::json::object()), conf.romHeader);
   metadataFromJson(doc.value("metadata", nlohmann::json::object()), conf.metadata);
+  inputFromJson(doc.value("input", nlohmann::json::object()), conf.input);
+  multiplayerFromJson(doc.value("multiplayer", nlohmann::json::object()), conf.multiplayer);
   conf.sceneIdOnBoot = doc.value("sceneIdOnBoot", 1);
   conf.sceneIdOnReset = doc.value("sceneIdOnReset", 1);
   conf.sceneIdLastOpened = doc.value("sceneIdLastOpened", 1);

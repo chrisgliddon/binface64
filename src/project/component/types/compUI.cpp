@@ -4,6 +4,8 @@
  */
 #include "../components.h"
 
+#include <algorithm>
+
 #include "../../../context.h"
 #include "../../../editor/imgui/helper.h"
 #include "../../../utils/binaryFile.h"
@@ -19,12 +21,16 @@ namespace Project::Component::UI
     PROP_U64(document);
     PROP_U32(layer);
     PROP_BOOL(active);
+    PROP_S32(displayTarget);
+    PROP_U32(displayPlayer);
+    PROP_U32(inputPlayerMask);
   };
 
   std::shared_ptr<void> init(Object &obj)
   {
     auto data = std::make_shared<Data>();
     data->active.value = true;
+    data->inputPlayerMask.value = 1;
     return data;
   }
 
@@ -35,6 +41,9 @@ namespace Project::Component::UI
       .set(data.document)
       .set(data.layer)
       .set(data.active)
+      .set(data.displayTarget)
+      .set(data.displayPlayer)
+      .set(data.inputPlayerMask)
       .doc;
   }
 
@@ -44,6 +53,9 @@ namespace Project::Component::UI
     Utils::JSON::readProp(doc, data->document);
     Utils::JSON::readProp(doc, data->layer);
     Utils::JSON::readProp(doc, data->active, true);
+    Utils::JSON::readProp(doc, data->displayTarget, 0);
+    Utils::JSON::readProp(doc, data->displayPlayer, 0u);
+    Utils::JSON::readProp(doc, data->inputPlayerMask, 1u);
     return data;
   }
 
@@ -67,6 +79,10 @@ namespace Project::Component::UI
     ctx.fileObj.write<uint16_t>(assetIndex);
     ctx.fileObj.write<uint8_t>(static_cast<uint8_t>(layer));
     ctx.fileObj.write<uint8_t>(data.active.resolve(obj) ? 1 : 0);
+    ctx.fileObj.write<uint8_t>(static_cast<uint8_t>(std::clamp(data.displayTarget.resolve(obj), 0, 1)));
+    ctx.fileObj.write<uint8_t>(static_cast<uint8_t>(std::min<uint32_t>(data.displayPlayer.resolve(obj), 3)));
+    ctx.fileObj.write<uint8_t>(static_cast<uint8_t>(data.inputPlayerMask.resolve(obj) & 0x1F));
+    ctx.fileObj.write<uint8_t>(0);
   }
 
   void draw(Object &obj, Entry &entry)
@@ -78,6 +94,16 @@ namespace Project::Component::UI
     ImTable::addAssetVecComboBox("Document", documents, data.document.resolve(obj), [](auto){});
     ImTable::addObjProp("2D Layer", data.layer);
     ImTable::addObjProp("Active", data.active);
+    ImTable::addComboBox("Display Target", data.displayTarget.resolve(obj), {"Shared / Fullscreen", "Player Viewport"});
+    if(data.displayTarget.resolve(obj) == 1)ImTable::addObjProp("Display Player (0-3)", data.displayPlayer);
+    auto &inputOwner = data.inputPlayerMask.resolve(obj);
+    int owner = inputOwner == 0x01 ? 0 : inputOwner == 0x02 ? 1 : inputOwner == 0x04 ? 2
+      : inputOwner == 0x08 ? 3 : inputOwner == 0x10 ? 4 : inputOwner == 0x0F ? 5 : 6;
+    ImTable::addComboBox("Input Owner", owner, {
+      "Port 1", "Port 2", "Port 3", "Port 4", "Host", "Any", "Disabled"
+    });
+    constexpr uint32_t OWNER_VALUES[7]{0x01, 0x02, 0x04, 0x08, 0x10, 0x0F, 0x00};
+    inputOwner = OWNER_VALUES[std::clamp(owner, 0, 6)];
     ImTable::end();
   }
 }

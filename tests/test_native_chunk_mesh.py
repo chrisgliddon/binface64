@@ -57,6 +57,15 @@ namespace {
 std::array<const T3DVertPacked*, 8> loaded{};
 std::uint32_t loadCount{};
 std::uint32_t triangleCount{};
+std::uint32_t profiledTriangles{};
+std::uint32_t profiledBatches{};
+}
+
+namespace P64::Profiler {
+void recordChunk(std::uint32_t triangles, std::uint32_t batches) {
+  profiledTriangles += triangles;
+  profiledBatches += batches;
+}
 }
 
 extern "C" bool t3d_frustum_vs_aabb(
@@ -117,6 +126,7 @@ int main() {
   assert(draw.visibleChunks == 2 && draw.culledChunks == 1);
   assert(draw.submittedTriangles == 4 && draw.drawBatches == 2);
   assert(loadCount == 2 && triangleCount == 4);
+  assert(profiledTriangles == 4 && profiledBatches == 2);
   assert(mesh.metrics().allocatedBytes > sizeof(T3DVertPacked) * 3);
   mesh.close();
   assert(!mesh.initialized());

@@ -9,6 +9,7 @@
 #include "systems/dropShadows.h"
 #include "systems/sprites.h"
 #include "collision/gfxScale.h"
+#include "input/input.h"
 
 namespace
 {
@@ -199,9 +200,9 @@ namespace P64::Script::C17EA8EAB6CF1DEB
       User::ctx.playerFloorId = data->body->floorObjectId();
     }
 
-    auto pressed = joypad_get_buttons_pressed(JOYPAD_PORT_1);
-    auto inp = joypad_get_inputs(JOYPAD_PORT_1);
-    auto held = joypad_get_buttons_held(JOYPAD_PORT_1);
+    auto pressed = Input::rawButtonsPressed(0);
+    auto inp = Input::get(0).raw;
+    auto held = Input::rawButtonsHeld(0);
 
     if (data->hurtTimeout > 0.0f)
     {

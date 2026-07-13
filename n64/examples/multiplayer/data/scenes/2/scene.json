@@ -1,0 +1,15 @@
+{
+  "conf": {
+    "name":"Shared Checkpoint Race","fbWidth":320,"fbHeight":240,"fbFormat":0,
+    "clearColor":[0.08,0.12,0.16,1],"doClearColor":true,"doClearDepth":true,"renderPipeline":0,
+    "frameLimit":0,"filter":1,"audioFreq":32000,"physicsTickRate":50,"gravity":[0,-9.81,0],
+    "visualUnitsPerMeter":100,"velocitySolverIterations":7,"positionSolverIterations":6,"interpolatePhysicsTransforms":true,
+    "layers3D":[{"name":"3D","depthWrite":true,"depthCompare":true,"blender":0,"fog":false,"fogColor":[0,0,0,0],"fogMin":0,"fogMax":0,"fogColorMode":0,"lightMode":0}],"layersPtx":[],
+    "layers2D":[{"name":"HUD","depthWrite":false,"depthCompare":false,"blender":0,"fog":false,"fogColor":[0,0,0,0],"fogMin":0,"fogMax":0,"fogColorMode":0,"lightMode":0}]
+  },
+  "graph": {"name":"Scene","uuid":2,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,"pos":[0,0,0],"rot":[0,0,0,1],"scale":[1,1,1],"propOverrides":{},"components":[],"children":[
+    {"name":"Race Shared Camera","uuid":301,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,"pos":[0,800,1000],"rot":[0,0,0,1],"scale":[1,1,1],"propOverrides":{},"children":[],"components":[{"id":3,"uuid":3001,"name":"Camera","data":{"vpOffset":[0,0],"vpSize":[320,240],"fov":65,"near":10,"far":6000,"aspect":0,"mode":1,"target":1,"player":0}}]},
+    {"name":"Race Start A","uuid":302,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,"pos":[-100,0,0],"rot":[0,0,0,1],"scale":[1,1,1],"propOverrides":{},"children":[],"components":[{"id":15,"uuid":3002,"name":"Player Spawn","data":{"target":0,"index":0}}]},
+    {"name":"Race Start B","uuid":303,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,"pos":[100,0,0],"rot":[0,0,0,1],"scale":[1,1,1],"propOverrides":{},"children":[],"components":[{"id":15,"uuid":3003,"name":"Player Spawn","data":{"target":0,"index":0}}]}
+  ]}
+}

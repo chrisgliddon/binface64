@@ -40,6 +40,7 @@ void Build::buildScripts(Project::Project &project, SceneCtx &sceneCtx)
     bool hasDestroy = Utils::CPP::hasFunction(src, "void", "destroy");
     bool hasFixedUpdate = Utils::CPP::hasFunction(src, "void", "fixedUpdate");
     bool hasUpdate  = Utils::CPP::hasFunction(src, "void", "update");
+    bool hasUnscaledUpdate = Utils::CPP::hasFunction(src, "void", "unscaledUpdate");
     bool hasDraw    = Utils::CPP::hasFunction(src, "void", "draw");
     bool hasEvent   = Utils::CPP::hasFunction(src, "void", "onEvent");
     bool hasColl    = Utils::CPP::hasFunction(src, "void", "onCollision");
@@ -53,6 +54,7 @@ void Build::buildScripts(Project::Project &project, SceneCtx &sceneCtx)
     if(hasInit)srcDecl += "void init(Object& obj, Data *data);\n";
     if(hasDestroy)srcDecl += "void destroy(Object& obj, Data *data);\n";
     if(hasUpdate)srcDecl += "void update(Object& obj, Data *data, float deltaTime);\n";
+    if(hasUnscaledUpdate)srcDecl += "void unscaledUpdate(Object& obj, Data *data, float unscaledDeltaTime);\n";
     if(hasFixedUpdate)srcDecl += "void fixedUpdate(Object& obj, Data *data, float fixedDeltaTime);\n";
     if(hasDraw)srcDecl += "void draw(Object& obj, Data *data, float deltaTime);\n";
     if(hasEvent)srcDecl += "void onEvent(Object& obj, Data *data, const ObjectEvent& event);\n";
@@ -63,6 +65,7 @@ void Build::buildScripts(Project::Project &project, SceneCtx &sceneCtx)
     if(hasInit)srcEntries += " .init = (FuncObjInit)" + uuidStr + "::init,\n";
     if(hasDestroy)srcEntries += " .destroy = (FuncObjInit)" + uuidStr + "::destroy,\n";
     if(hasUpdate)srcEntries += " .update = (FuncObjDataDelta)" + uuidStr + "::update,\n";
+    if(hasUnscaledUpdate)srcEntries += " .unscaledUpdate = (FuncObjDataDelta)" + uuidStr + "::unscaledUpdate,\n";
     if(hasFixedUpdate)srcEntries += " .fixedUpdate = (FuncObjDataDelta)" + uuidStr + "::fixedUpdate,\n";
     if(hasDraw)srcEntries += " .draw = (FuncObjDataDelta)" + uuidStr + "::draw,\n";
     if(hasEvent)srcEntries += " .onEvent = (FuncObjDataEvent)" + uuidStr + "::onEvent,\n";
@@ -107,6 +110,7 @@ void Build::buildGlobalScripts(Project::Project &project, SceneCtx &sceneCtx)
   enumMap["onScenePreUnload"]  = "SCENE_PRE_UNLOAD";
   enumMap["onScenePostUnload"] = "SCENE_POST_UNLOAD";
   enumMap["onSceneUpdate"]     = "SCENE_UPDATE";
+  enumMap["onSceneUnscaledUpdate"] = "SCENE_UNSCALED_UPDATE";
   enumMap["onScenePreDraw"]    = "SCENE_PRE_DRAW";
   enumMap["onScenePreDraw3D"]  = "SCENE_PRE_DRAW_3D";
   enumMap["onScenePostDraw3D"] = "SCENE_POST_DRAW_3D";
@@ -160,9 +164,8 @@ void Build::buildGlobalScripts(Project::Project &project, SceneCtx &sceneCtx)
   // builtin debug-menu hotkey (L + D-Pad Up), opt-out via project settings
   if(project.conf.debugMenu) {
     nameMap["onSceneUpdate"] += "{\n"
-      "auto _h = joypad_get_buttons_held(JOYPAD_PORT_1);\n"
-      "auto _p = joypad_get_buttons_pressed(JOYPAD_PORT_1);\n"
-      "if(_h.l && _p.d_up) P64::Debug::Overlay::toggle(); \n"
+      "if(P64::Input::buttonHeld(0, P64::Input::Button::L) && "
+      "P64::Input::buttonPressed(0, P64::Input::Button::D_UP)) P64::Debug::Overlay::toggle(); \n"
     "}\n";
   }
 

@@ -38,6 +38,11 @@ namespace P64::Script::__UUID__
     // this is called once every frame, put your main logic here
   }
 
+  void unscaledUpdate(Object& obj, Data *data, float unscaledDeltaTime)
+  {
+    // this continues while multiplayer gameplay/fixed updates are paused after a disconnect
+  }
+
   void fixedUpdate(Object& obj, Data *data, float fixedDeltaTime)
   {
     // this is called on the fixed physics timestep before collision/physics are stepped

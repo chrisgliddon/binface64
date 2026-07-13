@@ -137,6 +137,7 @@ namespace P64
       void loadScene();
 
       void updateChildObjectStates(const Object* parent, Object& obj);
+      void updateCameraLayout();
 
     public:
       uint64_t ticksActorUpdate{0};
@@ -158,13 +159,17 @@ namespace P64
       [[nodiscard]] uint16_t getId() const { return id; }
       [[nodiscard]] Camera* getCamera(uint32_t index = 0) { return cameras[index]; }
       [[nodiscard]] Camera& getActiveCamera() { return *camMain; }
+      [[nodiscard]] Camera* getCameraForPlayer(uint8_t player) const;
+      [[nodiscard]] Camera* getSharedCamera() const;
+      [[nodiscard]] uint8_t getActiveCameraCount() const;
+      [[nodiscard]] bool isSplitScreen() const;
 
       Coll::CollisionScene &getCollision() { return *Coll::collisionSceneGetInstance(); }
 
       void onObjectCollision(const Coll::CollEvent &event);
 
-      void sendEvent(uint16_t targetId, uint16_t senderId, uint16_t type, uint32_t value) {
-        eventQueue[eventQueueIdx].add(targetId, senderId, type, value);
+      void sendEvent(uint16_t targetId, uint16_t senderId, uint16_t type, uint32_t value, uint8_t sourcePlayer = 1) {
+        eventQueue[eventQueueIdx].add(targetId, senderId, type, value, sourcePlayer);
       }
 
       void addCamera(Camera *cam) {

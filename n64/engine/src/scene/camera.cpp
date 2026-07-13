@@ -31,6 +31,10 @@ void P64::Camera::attach() {
 }
 
 void P64::Camera::setScreenArea(int x, int y, int width, int height) {
+  screenArea = {
+    static_cast<int16_t>(x), static_cast<int16_t>(y),
+    static_cast<int16_t>(width), static_cast<int16_t>(height)
+  };
   t3d_viewport_set_area(viewports, x,y, width, height);
 }
 
@@ -52,4 +56,3 @@ fm_vec3_t P64::Camera::getScreenPos(const fm_vec3_t &worldPos)
   t3d_viewport_calc_viewspace_pos(viewports, res, worldPos);
   return res;
 }
-

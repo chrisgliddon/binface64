@@ -5,6 +5,7 @@
 #include "systems/fonts.h"
 #include "scene/components/model.h"
 #include "../p64/assetTable.h"
+#include "input/input.h"
 
 namespace
 {
@@ -127,7 +128,7 @@ namespace P64::Script::CD43F65D4883D4A8
     {
       data->textTimer = fminf(data->textTimer + deltaTime * TEXT_FADE_TIME, 1.0f);
 
-      auto pressed = joypad_get_buttons_pressed(JOYPAD_PORT_1);
+      auto pressed = Input::rawButtonsPressed(0);
       if(!canAfford(data->coinAmount))return;
       //if(!canAfford(data->coinAmount) || !pressed.b)return;
 

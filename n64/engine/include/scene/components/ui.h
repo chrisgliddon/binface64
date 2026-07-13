@@ -5,6 +5,7 @@
 #pragma once
 
 #include <libdragon.h>
+#include <array>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -42,6 +43,7 @@ namespace P64::Comp
     static constexpr uint32_t ID = 13;
 
     using Rect = P64::UI::Layout::Rect;
+    enum class DisplayTarget : uint8_t { Shared, Player };
     struct State
     {
       bool visible{true};
@@ -57,15 +59,23 @@ namespace P64::Comp
     std::vector<State> states{};
     std::vector<Rect> rects{};
     uint16_t focused{P64::UI::Format::NO_INDEX};
+    std::array<uint16_t, 4> focusedPlayers{
+      P64::UI::Format::NO_INDEX, P64::UI::Format::NO_INDEX,
+      P64::UI::Format::NO_INDEX, P64::UI::Format::NO_INDEX
+    };
     uint16_t editing{P64::UI::Format::NO_INDEX};
+    uint8_t editingPlayer{0xFF};
     uint16_t keyboardIndex{};
     uint8_t layer{};
+    DisplayTarget displayTarget{DisplayTarget::Shared};
+    uint8_t displayPlayer{};
+    uint8_t inputPlayerMask{1};
     bool active{true};
     std::string editOriginal{};
 
     static uint32_t getAllocSize([[maybe_unused]] uint16_t *initData) { return sizeof(UI); }
     static void initDelete(Object &obj, UI *data, uint16_t *initData);
-    static void update(Object &obj, UI *data, float deltaTime);
+    static void unscaledUpdate(Object &obj, UI *data, float unscaledDeltaTime);
     static void draw2D(Object &obj, UI *data, float deltaTime);
 
     [[nodiscard]] int32_t find(uint32_t id) const;
@@ -78,6 +88,7 @@ namespace P64::Comp
     bool setImage(uint32_t id, uint32_t assetIndex);
     bool setValue(uint32_t id, uint16_t current, uint16_t maximum);
     bool focus(uint32_t id);
+    bool focus(uint32_t id, uint8_t player);
     bool bindDialogue(P64::UI::DialogueRunner &runner, uint32_t textId, uint32_t speakerId=0);
   };
 }

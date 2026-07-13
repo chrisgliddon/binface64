@@ -75,6 +75,10 @@ namespace P64::AudioManager
   void setListener(const fm_vec3_t &position, const fm_vec3_t &forward, const fm_vec3_t &up = {0, 1, 0});
   /** Convenience overload using a BF64 camera transform. */
   void setListener(const Camera &camera);
+  void clearListeners();
+  bool addListener(const fm_vec3_t &position, const fm_vec3_t &forward, const fm_vec3_t &up = {0, 1, 0});
+  bool addListener(const Camera &camera);
+  [[nodiscard]] uint8_t getListenerCount();
 
   /** Dispatch WAV64/XM64 playback from the generated asset type tag. */
   Audio::Handle play2D(uint32_t assetId);

@@ -2,6 +2,7 @@
  * Small dependency-free positional-audio math surface.
  */
 #pragma once
+#include <cstddef>
 
 namespace P64::Audio::Spatial
 {
@@ -37,4 +38,11 @@ namespace P64::Audio::Spatial
   };
 
   [[nodiscard]] Mix calculate(const Vec3 &source, const Listener &listener, const Settings &settings);
+  /** Per-channel strongest contribution across split-screen listeners. */
+  [[nodiscard]] Mix calculateStrongest(
+    const Vec3 &source,
+    const Listener *listeners,
+    std::size_t listenerCount,
+    const Settings &settings
+  );
 }

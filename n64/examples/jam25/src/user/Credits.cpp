@@ -3,6 +3,7 @@
 #include "../p64/assetTable.h"
 #include "systems/fonts.h"
 #include "systems/screenFade.h"
+#include "input/input.h"
 
 namespace
 {
@@ -128,7 +129,7 @@ namespace P64::Script::C10BED11E4F936F7
 
   void update(Object& obj, Data *data, float deltaTime)
   {
-    auto held = joypad_get_buttons_held(JOYPAD_PORT_1);
+    auto held = Input::rawButtonsHeld(0);
     if(held.a || held.b)
     {
       deltaTime *= 10.0f;

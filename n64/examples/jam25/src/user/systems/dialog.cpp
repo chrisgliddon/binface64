@@ -8,6 +8,7 @@
 
 #include "../../p64/assetTable.h"
 #include "../globals.h"
+#include "input/input.h"
 
 namespace
 {
@@ -103,11 +104,9 @@ namespace P64::User::Dialog
     texBox = nullptr;
   }
 
-  constinit joypad_8way_t lastDir{JOYPAD_8WAY_NONE};
-
   bool update()
   {
-    auto pressed = joypad_get_buttons_pressed(JOYPAD_PORT_1);
+    auto pressed = Input::rawButtonsPressed(0);
 
     timer += VI::SwapChain::getDeltaTime();
     float charDelay = slowMode ? 0.12f : 0.02f;
@@ -120,13 +119,8 @@ namespace P64::User::Dialog
     // modal selection
     if(currMsg.isModal && currMsg.isReady())
     {
-      auto dir = joypad_get_direction(JOYPAD_PORT_1, JOYPAD_2D_ANY);
-      if(lastDir != dir)
-      {
-        lastDir = dir;
-        if(dir == JOYPAD_8WAY_LEFT || dir == JOYPAD_8WAY_RIGHT) {
-          selOption = (selOption + 1) % 2;
-        }
+      if(pressed.d_left || pressed.d_right) {
+        selOption = (selOption + 1) % 2;
       }
     }
 

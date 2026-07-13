@@ -4,6 +4,7 @@
 
 #include "script/globalScript.h"
 #include "debug/debugMenu.h"
+#include "input/input.h"
 
 namespace P64::GlobalScript
 {

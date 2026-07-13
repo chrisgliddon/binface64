@@ -18,6 +18,7 @@ namespace P64
   typedef uint32_t(*FuncGetAllocSize)(void*);
   typedef void(*FuncInitDel)(Object&, void*, void*);
   typedef void(*FuncUpdate)(Object&, void*, float deltaTime);
+  typedef void(*FuncUnscaledUpdate)(Object&, void*, float unscaledDeltaTime);
   typedef void(*FuncFixedUpdate)(Object&, void*, float fixedDeltaTime);
   typedef void(*FuncDraw)(Object&, void*, float deltaTime);
   typedef void(*FuncDraw2D)(Object&, void*, float deltaTime);
@@ -28,6 +29,7 @@ namespace P64
   {
     FuncInitDel initDel{};
     FuncUpdate update{};
+    FuncUnscaledUpdate unscaledUpdate{};
     FuncFixedUpdate fixedUpdate{};
     FuncDraw draw{};
     FuncDraw2D draw2D{};
@@ -36,6 +38,6 @@ namespace P64
     FuncGetAllocSize getAllocSize{};
   };
 
-  constexpr uint32_t COMP_TABLE_SIZE = 16;
+  constexpr uint32_t COMP_TABLE_SIZE = 17;
   extern const ComponentDef COMP_TABLE[COMP_TABLE_SIZE];
 }

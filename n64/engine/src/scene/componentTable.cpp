@@ -21,6 +21,8 @@
 #include "scene/components/charBody.h"
 #include "scene/components/ui.h"
 #include "scene/components/audio3d.h"
+#include "scene/components/playerSpawn.h"
+#include "scene/components/blobShadow.h"
 
 // some template magic to auto-detect if a function exists in a component
 #define HAS_FUNC_TPL(NAME_HAS, NAME_GET, FUNC) \
@@ -40,6 +42,7 @@ namespace
   HAS_FUNC_TPL(has_draw,   get_draw,    draw   )
   HAS_FUNC_TPL(has_draw2D, get_draw2D,  draw2D )
   HAS_FUNC_TPL(has_update, get_update,  update )
+  HAS_FUNC_TPL(has_unscaled_update, get_unscaled_update, unscaledUpdate)
   HAS_FUNC_TPL(has_fixed_update, get_fixed_update, fixedUpdate)
   HAS_FUNC_TPL(has_event,  get_event,   onEvent)
   HAS_FUNC_TPL(has_coll,   get_coll,    onColl )
@@ -49,6 +52,7 @@ namespace
   [Comp::NAME::ID] = { \
     .initDel = reinterpret_cast<FuncInitDel>(Comp::NAME::initDelete), \
     .update = (FuncUpdate)get_update<Comp::NAME>(), \
+    .unscaledUpdate = (FuncUnscaledUpdate)get_unscaled_update<Comp::NAME>(), \
     .fixedUpdate = (FuncFixedUpdate)get_fixed_update<Comp::NAME>(), \
     .draw   = (FuncDraw)(get_draw<Comp::NAME>()), \
     .draw2D = (FuncDraw2D)(get_draw2D<Comp::NAME>()), \
@@ -75,5 +79,7 @@ namespace P64
     SET_COMP(CharBody),
     SET_COMP(UI),
     SET_COMP(Audio3D),
+    SET_COMP(PlayerSpawn),
+    SET_COMP(BlobShadow),
   };
 }

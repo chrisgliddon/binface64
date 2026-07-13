@@ -53,6 +53,8 @@ uint32_t Build::writeObject(Build::SceneCtx &ctx, Project::Object &obj, bool sav
 
   uint16_t objFlags = 0;
   if(obj.enabled)objFlags |= P64::ObjectFlags::ACTIVE;
+  objFlags |= P64::ObjectFlags::VIEW_MASK_AUTHORED;
+  objFlags |= static_cast<uint16_t>(obj.viewMask & 0x1F) << 8;
   if(!srcObj->children.empty() || !obj.children.empty())objFlags |= P64::ObjectFlags::HAS_CHILDREN;
 
   ctx.fileObj.write<uint16_t>(objFlags); // @TODO type

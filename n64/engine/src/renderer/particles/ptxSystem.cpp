@@ -4,13 +4,18 @@
 */
 #include "renderer/particles/ptxSystem.h"
 #include "lib/matrixManager.h"
+#include "debug/profiler.h"
 
 P64::PTX::System::System(Type ptxType, uint32_t maxSize)
   : countMax{maxSize}, count{0}, type{ptxType}
 {
   assert(sizeof(countMax) % 2 == 0);
   if(countMax > 0) {
-    std::size_t allocSize = countMax * sizeof(TPXParticle) / 2;
+    const std::size_t pairCount = (countMax + 1U) / 2U;
+    const std::size_t pairSize = (type == COLOR_A_S16 || type == TEX_A_S16)
+      ? sizeof(TPXParticleS16)
+      : sizeof(TPXParticleS8);
+    const std::size_t allocSize = pairCount * pairSize;
     particles = malloc_uncached(allocSize);
     sys_hw_memset(particles, 0, allocSize);
   }
@@ -24,6 +29,7 @@ P64::PTX::System::~System() {
 
 void P64::PTX::System::draw() const {
   if(count == 0)return;
+  Profiler::recordParticles(count);
 
   uint32_t safeCount = count;
   if(safeCount % 2 != 0) {
@@ -43,4 +49,3 @@ void P64::PTX::System::draw() const {
     case TEX_A_S16: tpx_particle_draw_tex_s16((TPXParticleS16*)particles, safeCount); break;
   }
 }
-

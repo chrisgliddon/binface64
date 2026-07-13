@@ -1,0 +1,29 @@
+{
+  "conf": {
+    "name": "Adaptive Arena",
+    "fbWidth": 320, "fbHeight": 240, "fbFormat": 0,
+    "clearColor": [0.05, 0.06, 0.09, 1.0], "doClearColor": true, "doClearDepth": true,
+    "renderPipeline": 0, "frameLimit": 0, "filter": 1, "audioFreq": 32000,
+    "physicsTickRate": 50, "gravity": [0.0, -9.81, 0.0], "visualUnitsPerMeter": 100.0,
+    "velocitySolverIterations": 7, "positionSolverIterations": 6, "interpolatePhysicsTransforms": true,
+    "layers3D": [{"name":"3D","depthWrite":true,"depthCompare":true,"blender":0,"fog":false,"fogColor":[0,0,0,0],"fogMin":0,"fogMax":0,"fogColorMode":0,"lightMode":0}],
+    "layersPtx": [],
+    "layers2D": [{"name":"HUD","depthWrite":false,"depthCompare":false,"blender":0,"fog":false,"fogColor":[0,0,0,0],"fogMin":0,"fogMax":0,"fogColorMode":0,"lightMode":0}]
+  },
+  "graph": {
+    "name":"Scene","uuid":1,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,
+    "pos":[0,0,0],"rot":[0,0,0,1],"scale":[1,1,1],"propOverrides":{},"components":[],
+    "children": [
+      {"name":"Shared Camera","uuid":101,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,"pos":[0,500,700],"rot":[0,0,0,1],"scale":[1,1,1],"propOverrides":{},"children":[],"components":[{"id":3,"uuid":1001,"name":"Camera","data":{"vpOffset":[0,0],"vpSize":[320,240],"fov":65,"near":10,"far":5000,"aspect":0,"mode":1,"target":1,"player":0}}]},
+      {"name":"Player 1 Camera","uuid":102,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,"pos":[-300,300,500],"rot":[0,0,0,1],"scale":[1,1,1],"propOverrides":{},"children":[],"components":[{"id":3,"uuid":1002,"name":"Camera","data":{"vpOffset":[0,0],"vpSize":[320,240],"fov":65,"near":10,"far":5000,"aspect":0,"mode":1,"target":2,"player":0}}]},
+      {"name":"Player 2 Camera","uuid":103,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,"pos":[300,300,500],"rot":[0,0,0,1],"scale":[1,1,1],"propOverrides":{},"children":[],"components":[{"id":3,"uuid":1003,"name":"Camera","data":{"vpOffset":[0,0],"vpSize":[320,240],"fov":65,"near":10,"far":5000,"aspect":0,"mode":1,"target":2,"player":1}}]},
+      {"name":"Player 3 Camera","uuid":104,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,"pos":[-300,300,-500],"rot":[0,1,0,0],"scale":[1,1,1],"propOverrides":{},"children":[],"components":[{"id":3,"uuid":1004,"name":"Camera","data":{"vpOffset":[0,0],"vpSize":[320,240],"fov":65,"near":10,"far":5000,"aspect":0,"mode":1,"target":2,"player":2}}]},
+      {"name":"Player 4 Camera","uuid":105,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,"pos":[300,300,-500],"rot":[0,1,0,0],"scale":[1,1,1],"propOverrides":{},"children":[],"components":[{"id":3,"uuid":1005,"name":"Camera","data":{"vpOffset":[0,0],"vpSize":[320,240],"fov":65,"near":10,"far":5000,"aspect":0,"mode":1,"target":2,"player":3}}]},
+      {"name":"Spawn P1","uuid":201,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,"pos":[-200,0,-200],"rot":[0,0,0,1],"scale":[1,1,1],"propOverrides":{},"children":[],"components":[{"id":15,"uuid":2001,"name":"Player Spawn","data":{"target":1,"index":0}}]},
+      {"name":"Spawn P2","uuid":202,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,"pos":[200,0,-200],"rot":[0,0,0,1],"scale":[1,1,1],"propOverrides":{},"children":[],"components":[{"id":15,"uuid":2002,"name":"Player Spawn","data":{"target":1,"index":1}}]},
+      {"name":"Spawn P3","uuid":203,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,"pos":[-200,0,200],"rot":[0,0,0,1],"scale":[1,1,1],"propOverrides":{},"children":[],"components":[{"id":15,"uuid":2003,"name":"Player Spawn","data":{"target":1,"index":2}}]},
+      {"name":"Spawn P4","uuid":204,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,"pos":[200,0,200],"rot":[0,0,0,1],"scale":[1,1,1],"propOverrides":{},"children":[],"components":[{"id":15,"uuid":2004,"name":"Player Spawn","data":{"target":1,"index":3}}]},
+      {"name":"Neutral Respawn","uuid":205,"enabled":true,"selectable":true,"viewMask":31,"uuidPrefab":0,"pos":[0,0,0],"rot":[0,0,0,1],"scale":[1,1,1],"propOverrides":{},"children":[],"components":[{"id":15,"uuid":2005,"name":"Player Spawn","data":{"target":0,"index":0}}]}
+    ]
+  }
+}

@@ -13,6 +13,8 @@
 #include "renderer/drawLayer.h"
 #include "ui/dialogue.h"
 #include "ui/utf8.h"
+#include "input/input.h"
+#include "scene/camera.h"
 
 namespace UIFormat = P64::UI::Format;
 
@@ -23,6 +25,10 @@ namespace
     uint16_t assetIdx{};
     uint8_t layer{};
     uint8_t flags{};
+    P64::Comp::UI::DisplayTarget displayTarget{P64::Comp::UI::DisplayTarget::Shared};
+    uint8_t displayPlayer{};
+    uint8_t inputPlayerMask{1};
+    uint8_t padding{};
   };
 
   const UIFormat::Element* elements(const UIFormat::Header *document)
@@ -106,14 +112,32 @@ namespace
     return best;
   }
 
-  void sendUIEvent(P64::Object &obj, uint16_t type, uint32_t elementId)
+  void sendUIEvent(P64::Object &obj, uint16_t type, uint32_t elementId, uint8_t player)
   {
-    P64::Object::getScene().sendEvent(obj.id, obj.id, type, elementId);
+    P64::Object::getScene().sendEvent(obj.id, obj.id, type, elementId, player + 1);
   }
 
   bool setDialogueText(void *context, uint32_t elementId, const char *value)
   {
     return static_cast<P64::Comp::UI*>(context)->setText(elementId, value);
+  }
+
+  P64::Comp::UI::Rect displayViewport(const P64::Comp::UI &data)
+  {
+    auto &scene = P64::Object::getScene();
+    P64::Comp::UI::Rect viewport{
+      0.0f, 0.0f,
+      static_cast<float>(scene.getConf().screenWidth),
+      static_cast<float>(scene.getConf().screenHeight)
+    };
+    if(data.displayTarget != P64::Comp::UI::DisplayTarget::Player)return viewport;
+    auto *camera = scene.getCameraForPlayer(data.displayPlayer);
+    if(camera == nullptr || !camera->isActive())return viewport;
+    const auto &area = camera->getScreenArea();
+    return {
+      static_cast<float>(area.x), static_cast<float>(area.y),
+      static_cast<float>(area.x + area.width), static_cast<float>(area.y + area.height)
+    };
   }
 
   void calculateRects(P64::Comp::UI &data)
@@ -122,6 +146,44 @@ namespace
     const std::uint16_t count = std::min<std::uint16_t>(data.document->elementCount, UIFormat::MAX_ELEMENTS);
     for(std::uint16_t index=0; index<count; ++index)visible[index] = data.states[index].visible ? 1 : 0;
     P64::UI::Layout::calculate(*data.document, elements(data.document), visible, data.rects.data());
+
+    const auto viewport = displayViewport(data);
+    const float scaleX = data.document->canvasWidth > 0
+      ? (viewport.x1 - viewport.x0) / static_cast<float>(data.document->canvasWidth) : 1.0f;
+    const float scaleY = data.document->canvasHeight > 0
+      ? (viewport.y1 - viewport.y0) / static_cast<float>(data.document->canvasHeight) : 1.0f;
+    for(auto &rect : data.rects) {
+      rect = {
+        viewport.x0 + rect.x0 * scaleX, viewport.y0 + rect.y0 * scaleY,
+        viewport.x0 + rect.x1 * scaleX, viewport.y0 + rect.y1 * scaleY
+      };
+    }
+  }
+
+  int focusedPlayer(const P64::Comp::UI &data, uint16_t element)
+  {
+    const uint8_t mask = data.inputPlayerMask & 0x10
+      ? static_cast<uint8_t>(1u << std::min<uint8_t>(P64::Input::getConfig().hostPort, 3))
+      : data.inputPlayerMask & 0x0F;
+    for(uint8_t player=0; player<4; ++player) {
+      if((mask & (1u << player)) && data.focusedPlayers[player] == element)return player;
+    }
+    return -1;
+  }
+
+  uint8_t resolvedInputMask(const P64::Comp::UI &data)
+  {
+    if(data.inputPlayerMask & 0x10) {
+      const auto host = std::min<uint8_t>(P64::Input::getConfig().hostPort, 3);
+      return static_cast<uint8_t>(1u << host);
+    }
+    return data.inputPlayerMask & 0x0F;
+  }
+
+  uint32_t playerFocusColor(uint8_t player)
+  {
+    constexpr uint32_t COLORS[4]{0x4DA3FFFF, 0xFF5A5AFF, 0x62D26FFF, 0xFFD24DFF};
+    return COLORS[player & 3u];
   }
 
   void drawBox(const P64::Comp::UI::Rect &rect, uint32_t packed)
@@ -166,13 +228,29 @@ namespace
     constexpr float CELL_W = 28.0f;
     constexpr float CELL_H = 18.0f;
     int rows = static_cast<int>((count + COLS - 1) / COLS);
-    float x0 = (data.document->canvasWidth - COLS * CELL_W) * 0.5f;
-    float y0 = data.document->canvasHeight - rows * CELL_H - 8.0f;
-    drawBox({x0-4, y0-4, x0+COLS*CELL_W+4, static_cast<float>(data.document->canvasHeight)-4}, 0x101018E8);
+    const auto viewport = displayViewport(data);
+    const float scaleX = data.document->canvasWidth > 0
+      ? (viewport.x1 - viewport.x0) / static_cast<float>(data.document->canvasWidth) : 1.0f;
+    const float scaleY = data.document->canvasHeight > 0
+      ? (viewport.y1 - viewport.y0) / static_cast<float>(data.document->canvasHeight) : 1.0f;
+    const float localX0 = (data.document->canvasWidth - COLS * CELL_W) * 0.5f;
+    const float localY0 = data.document->canvasHeight - rows * CELL_H - 8.0f;
+    const float x0 = viewport.x0 + localX0 * scaleX;
+    const float y0 = viewport.y0 + localY0 * scaleY;
+    const float cellWidth = CELL_W * scaleX;
+    const float cellHeight = CELL_H * scaleY;
+    drawBox({
+      x0 - 4.0f * scaleX, y0 - 4.0f * scaleY,
+      x0 + COLS * cellWidth + 4.0f * scaleX,
+      viewport.y0 + (static_cast<float>(data.document->canvasHeight) - 4.0f) * scaleY
+    }, 0x101018E8);
     for(size_t i=0; i<count; ++i) {
-      float x = x0 + static_cast<float>(i % COLS) * CELL_W;
-      float y = y0 + static_cast<float>(i / COLS) * CELL_H;
-      if(i == data.keyboardIndex)drawBox({x, y, x+CELL_W-2, y+CELL_H-2}, element.focusColor);
+      float x = x0 + static_cast<float>(i % COLS) * cellWidth;
+      float y = y0 + static_cast<float>(i / COLS) * cellHeight;
+      if(i == data.keyboardIndex)drawBox(
+        {x, y, x+cellWidth-2.0f*scaleX, y+cellHeight-2.0f*scaleY},
+        playerFocusColor(data.editingPlayer < 4 ? data.editingPlayer : 0)
+      );
       P64::UI::Utf8::Codepoint codepoint{};
       if(!P64::UI::Utf8::at(charset, i, codepoint))continue;
       char value[5]{};
@@ -181,7 +259,7 @@ namespace
       style.color = colorFromU32(element.textColor);
       auto font = const_cast<rdpq_font_t*>(rdpq_text_get_font(static_cast<uint8_t>(element.assetIndex)));
       if(font)rdpq_font_style(font, 0, &style);
-      rdpq_text_print(nullptr, static_cast<uint8_t>(element.assetIndex), x+8, y+2, value);
+      rdpq_text_print(nullptr, static_cast<uint8_t>(element.assetIndex), x+8.0f*scaleX, y+2.0f*scaleY, value);
     }
   }
 }
@@ -199,6 +277,9 @@ void P64::Comp::UI::initDelete([[maybe_unused]] Object &obj, UI *data, uint16_t 
   assert(data->document->version == UIFormat::VERSION);
   data->layer = initData->layer;
   data->active = (initData->flags & 1) != 0;
+  data->displayTarget = initData->displayTarget;
+  data->displayPlayer = std::min<uint8_t>(initData->displayPlayer, 3);
+  data->inputPlayerMask = initData->inputPlayerMask & 0x1F;
   data->states.resize(data->document->elementCount);
   data->rects.resize(data->document->elementCount);
   const auto *items = elements(data->document);
@@ -216,6 +297,7 @@ void P64::Comp::UI::initDelete([[maybe_unused]] Object &obj, UI *data, uint16_t 
   }
   calculateRects(*data);
   data->focused = firstFocusable(*data);
+  data->focusedPlayers.fill(data->focused);
 }
 
 int32_t P64::Comp::UI::find(uint32_t id) const
@@ -291,9 +373,16 @@ bool P64::Comp::UI::setValue(uint32_t id, uint16_t current, uint16_t maximum)
 
 bool P64::Comp::UI::focus(uint32_t id)
 {
+  return focus(id, 0);
+}
+
+bool P64::Comp::UI::focus(uint32_t id, uint8_t player)
+{
+  if(player >= focusedPlayers.size())return false;
   int32_t index = find(id);
   if(index < 0 || !focusable(*this, index))return false;
-  focused = index;
+  focusedPlayers[player] = index;
+  if(player == 0)focused = index;
   return true;
 }
 
@@ -309,63 +398,87 @@ bool P64::Comp::UI::bindDialogue(P64::UI::DialogueRunner &runner, uint32_t textI
   return true;
 }
 
-void P64::Comp::UI::update(Object &obj, UI *data, [[maybe_unused]] float deltaTime)
+void P64::Comp::UI::unscaledUpdate(Object &obj, UI *data, [[maybe_unused]] float unscaledDeltaTime)
 {
   if(!data->active || !data->document)return;
   calculateRects(*data);
-  auto pressed = joypad_get_buttons_pressed(JOYPAD_PORT_1);
   const auto *items = elements(data->document);
+  data->focusedPlayers[0] = data->focused;
 
   if(data->editing != UIFormat::NO_INDEX)
   {
+    const uint8_t player = data->editingPlayer < 4 ? data->editingPlayer : 0;
+    const uint16_t pressed = P64::Input::get(player).buttonsPressed;
+    auto hit = [pressed](P64::Input::Button button) { return (pressed & P64::Input::mask(button)) != 0; };
     const auto &element = items[data->editing];
     const char *charset = stringAt(data->document, element.charsetOffset);
     uint16_t charsetCount = static_cast<uint16_t>(P64::UI::Utf8::count(charset));
     constexpr uint16_t COLS = 10;
     if(charsetCount > 0) {
-      if(pressed.d_left)data->keyboardIndex = data->keyboardIndex == 0 ? charsetCount-1 : data->keyboardIndex-1;
-      if(pressed.d_right)data->keyboardIndex = (data->keyboardIndex+1) % charsetCount;
-      if(pressed.d_up)data->keyboardIndex = data->keyboardIndex < COLS ? data->keyboardIndex : data->keyboardIndex-COLS;
-      if(pressed.d_down && data->keyboardIndex+COLS < charsetCount)data->keyboardIndex += COLS;
-      if(pressed.a && P64::UI::Utf8::appendCodepoint(
+      if(hit(P64::Input::Button::D_LEFT))data->keyboardIndex = data->keyboardIndex == 0 ? charsetCount-1 : data->keyboardIndex-1;
+      if(hit(P64::Input::Button::D_RIGHT))data->keyboardIndex = (data->keyboardIndex+1) % charsetCount;
+      if(hit(P64::Input::Button::D_UP))data->keyboardIndex = data->keyboardIndex < COLS ? data->keyboardIndex : data->keyboardIndex-COLS;
+      if(hit(P64::Input::Button::D_DOWN) && data->keyboardIndex+COLS < charsetCount)data->keyboardIndex += COLS;
+      if(hit(P64::Input::Button::A) && P64::UI::Utf8::appendCodepoint(
           data->states[data->editing].text, charset, data->keyboardIndex, element.maxLength)) {
-        sendUIEvent(obj, EVENT_TYPE_UI_CHANGE, element.id);
+        sendUIEvent(obj, EVENT_TYPE_UI_CHANGE, element.id, player);
       }
     }
-    if(pressed.c_left && P64::UI::Utf8::eraseLastCodepoint(data->states[data->editing].text)) {
-      sendUIEvent(obj, EVENT_TYPE_UI_CHANGE, element.id);
+    if(hit(P64::Input::Button::C_LEFT) && P64::UI::Utf8::eraseLastCodepoint(data->states[data->editing].text)) {
+      sendUIEvent(obj, EVENT_TYPE_UI_CHANGE, element.id, player);
     }
-    if(pressed.b) {
+    if(hit(P64::Input::Button::B)) {
       data->states[data->editing].text = data->editOriginal;
       data->editing = UIFormat::NO_INDEX;
-    } else if(pressed.start && (element.flags & UIFormat::SUBMIT_ON_START)) {
-      sendUIEvent(obj, EVENT_TYPE_UI_SUBMIT, element.id);
+      data->editingPlayer = 0xFF;
+    } else if(hit(P64::Input::Button::START) && (element.flags & UIFormat::SUBMIT_ON_START)) {
+      sendUIEvent(obj, EVENT_TYPE_UI_SUBMIT, element.id, player);
       data->editing = UIFormat::NO_INDEX;
+      data->editingPlayer = 0xFF;
     }
     return;
   }
 
-  uint32_t direction = 4;
-  if(pressed.d_up)direction = 0;
-  else if(pressed.d_down)direction = 1;
-  else if(pressed.d_left)direction = 2;
-  else if(pressed.d_right)direction = 3;
-  if(direction < 4)data->focused = spatialFocus(*data, data->focused, direction);
-  if(data->focused == UIFormat::NO_INDEX || !pressed.a)return;
+  for(uint8_t player=0; player<4; ++player)
+  {
+    if((resolvedInputMask(*data) & (1u << player)) == 0)continue;
+    const uint16_t pressed = P64::Input::get(player).buttonsPressed;
+    auto hit = [pressed](P64::Input::Button button) { return (pressed & P64::Input::mask(button)) != 0; };
+    uint32_t direction = 4;
+    if(hit(P64::Input::Button::D_UP))direction = 0;
+    else if(hit(P64::Input::Button::D_DOWN))direction = 1;
+    else if(hit(P64::Input::Button::D_LEFT))direction = 2;
+    else if(hit(P64::Input::Button::D_RIGHT))direction = 3;
+    if(direction < 4)data->focusedPlayers[player] = spatialFocus(*data, data->focusedPlayers[player], direction);
+    if(player == 0)data->focused = data->focusedPlayers[0];
+    const uint16_t focused = data->focusedPlayers[player];
+    if(focused == UIFormat::NO_INDEX || !hit(P64::Input::Button::A))continue;
 
-  const auto &element = items[data->focused];
-  if(element.type == UIFormat::ElementType::BUTTON) {
-    sendUIEvent(obj, EVENT_TYPE_UI_ACTIVATE, element.id);
-  } else if(element.type == UIFormat::ElementType::TEXT_INPUT) {
-    data->editing = data->focused;
-    data->editOriginal = data->states[data->editing].text;
-    data->keyboardIndex = 0;
+    const auto &element = items[focused];
+    if(element.type == UIFormat::ElementType::BUTTON) {
+      sendUIEvent(obj, EVENT_TYPE_UI_ACTIVATE, element.id, player);
+    } else if(element.type == UIFormat::ElementType::TEXT_INPUT) {
+      data->editing = focused;
+      data->editingPlayer = player;
+      data->editOriginal = data->states[data->editing].text;
+      data->keyboardIndex = 0;
+      break;
+    }
   }
 }
 
 void P64::Comp::UI::draw2D([[maybe_unused]] Object &obj, UI *data, [[maybe_unused]] float deltaTime)
 {
   if(!data->active || !data->document)return;
+  auto &scene = Object::getScene();
+  if(data->displayTarget == DisplayTarget::Player) {
+    auto *camera = scene.getCameraForPlayer(data->displayPlayer);
+    if(camera == nullptr || !camera->isActive())return;
+    const auto &area = camera->getScreenArea();
+    rdpq_set_scissor(area.x, area.y, area.x + area.width, area.y + area.height);
+  } else {
+    rdpq_set_scissor(0, 0, scene.getConf().screenWidth, scene.getConf().screenHeight);
+  }
   DrawLayer::use2D(data->layer);
   calculateRects(*data);
   const auto *items = elements(data->document);
@@ -374,10 +487,11 @@ void P64::Comp::UI::draw2D([[maybe_unused]] Object &obj, UI *data, [[maybe_unuse
     if(!effectivelyVisible(*data, i))continue;
     const auto &element = items[i];
     const auto &rect = data->rects[i];
-    bool selected = data->focused == i;
+    const int focusOwner = focusedPlayer(*data, i);
+    const bool selected = focusOwner >= 0;
     if(element.type == UIFormat::ElementType::CONTAINER || element.type == UIFormat::ElementType::BUTTON ||
        element.type == UIFormat::ElementType::TEXT_INPUT || element.type == UIFormat::ElementType::PROGRESS_BAR) {
-      drawBox(rect, selected ? element.focusColor : element.color);
+      drawBox(rect, selected ? playerFocusColor(static_cast<uint8_t>(focusOwner)) : element.color);
     }
     if(element.type == UIFormat::ElementType::PROGRESS_BAR) {
       const auto &state = data->states[i];
@@ -425,4 +539,5 @@ void P64::Comp::UI::draw2D([[maybe_unused]] Object &obj, UI *data, [[maybe_unuse
   }
   drawKeyboard(*data);
   DrawLayer::use2D();
+  rdpq_set_scissor(0, 0, scene.getConf().screenWidth, scene.getConf().screenHeight);
 }

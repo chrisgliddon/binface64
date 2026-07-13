@@ -1,6 +1,7 @@
 #include "script/userScript.h"
 #include "scene/sceneManager.h"
 #include <debug/debugDraw.h>
+#include "input/input.h"
 
 namespace P64::Script::C48BB14F061323F6
 {
@@ -40,9 +41,9 @@ namespace P64::Script::C48BB14F061323F6
 
   void update(Object& obj, Data *data, float deltaTime)
   {
-    auto held = joypad_get_buttons_held(JOYPAD_PORT_1);
+    auto held = Input::rawButtonsHeld(0);
     if(!held.l)return;
-    auto joypad = joypad_get_inputs(JOYPAD_PORT_1);
+    auto joypad = Input::get(0).raw;
     float camRotSpeed = deltaTime * 0.01f;
     float camSpeed = deltaTime * data->speed;
 

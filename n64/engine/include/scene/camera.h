@@ -13,6 +13,10 @@ namespace P64
 {
   class Camera
   {
+    public:
+      enum class Target : uint8_t { Manual, Shared, Player };
+      struct ScreenArea { int16_t x{}, y{}, width{}, height{}; };
+
     private:
       T3DViewport viewports{};
       fm_mat4_t viewMatrix{};
@@ -21,6 +25,10 @@ namespace P64
       fm_vec3_t target{}; // computed
 
       uint8_t needsProjUpdate{false};
+      Target viewTarget{Target::Manual};
+      uint8_t targetPlayer{};
+      bool active{true};
+      ScreenArea screenArea{};
     public:
       float fov{};
       float near{};
@@ -47,6 +55,13 @@ namespace P64
       }
 
       void setScreenArea(int x, int y, int width, int height);
+      [[nodiscard]] const ScreenArea& getScreenArea() const { return screenArea; }
+      void setViewTarget(Target value, uint8_t player = 0) { viewTarget = value; targetPlayer = player; }
+      [[nodiscard]] Target getViewTarget() const { return viewTarget; }
+      [[nodiscard]] uint8_t getTargetPlayer() const { return targetPlayer; }
+      [[nodiscard]] uint8_t getViewMask() const { return viewTarget == Target::Player ? (1u << targetPlayer) : (1u << 4); }
+      void setActive(bool value) { active = value; }
+      [[nodiscard]] bool isActive() const { return active; }
 
       /**
        * Sets new camera values based on a look-at transform.

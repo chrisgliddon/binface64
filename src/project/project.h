@@ -50,6 +50,55 @@ namespace Project
     std::vector<MetaLang> langs{MetaLang{}}; // langs[0] is always the default (unsuffixed) section
   };
 
+  struct InputActionBinding
+  {
+    std::uint16_t buttons{};
+    std::uint16_t chord{};
+  };
+
+  struct InputAction
+  {
+    std::string name{};
+    std::vector<InputActionBinding> bindings{};
+  };
+
+  struct InputAxisBinding
+  {
+    std::string source{"none"};
+    float scale{1.0f};
+    float deadZone{};
+  };
+
+  struct InputAxis
+  {
+    std::string name{};
+    std::vector<InputAxisBinding> bindings{};
+  };
+
+  struct InputConf
+  {
+    float deadZone{0.18f};
+    std::vector<InputAction> actions{};
+    std::vector<InputAxis> axes{};
+  };
+
+  struct ControllerMetadata
+  {
+    std::string name{};
+    bool rumble{true};
+  };
+
+  struct MultiplayerConf
+  {
+    std::array<ControllerMetadata, 4> controllers{
+      ControllerMetadata{"Player 1", true}, ControllerMetadata{"Player 2", true},
+      ControllerMetadata{"Player 3", true}, ControllerMetadata{"Player 4", true}
+    };
+    std::uint8_t enabledPortMask{0x0F};
+    std::uint8_t hostPort{};
+    int targetRdramMB{4};
+  };
+
   struct ProjectConf
   {
     std::string name{};
@@ -62,6 +111,8 @@ namespace Project
 
     RomHeaderConf romHeader{};
     MetadataConf metadata{};
+    InputConf input{};
+    MultiplayerConf multiplayer{};
 
     uint32_t sceneIdOnBoot{1};
     uint32_t sceneIdOnReset{1};

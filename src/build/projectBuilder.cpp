@@ -121,6 +121,7 @@ bool Build::buildProject(const std::string &configPath)
 
   // Global project config
   sceneCtx.files.push_back("filesystem/p64/conf");
+  sceneCtx.files.push_back("filesystem/p64/input");
 
   // Asset-Manager
   for (auto &typed : project.getAssets().getEntries()) {
@@ -161,6 +162,11 @@ bool Build::buildProject(const std::string &configPath)
 
       Utils::FS::saveTextFile(fsDataPath / "fileList.txt", fileStr);
     }
+  }
+
+  if(!buildInputConfig(project, sceneCtx)) {
+    Utils::Logger::log("Input config build failed!", Utils::Logger::LEVEL_ERROR);
+    return false;
   }
 
   // User scripts
@@ -282,8 +288,8 @@ bool Build::buildProject(const std::string &configPath)
       auto parsed = std::strtoul(value, nullptr, 10);
       return static_cast<uint16_t>(std::min<unsigned long>(parsed, 0xFFFF));
     };
-    f.write<uint16_t>(profileFrames("BF64_PROFILE_WARMUP", 120));
-    f.write<uint16_t>(profileFrames("BF64_PROFILE_FRAMES", 300));
+    f.write<uint16_t>(profileFrames("BF64_PROFILE_WARMUP", 180));
+    f.write<uint16_t>(profileFrames("BF64_PROFILE_FRAMES", 600));
     f.writeToFile(fsDataPath / "conf");
   }
 

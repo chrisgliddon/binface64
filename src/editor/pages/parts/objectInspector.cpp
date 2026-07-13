@@ -583,6 +583,20 @@ void Editor::ObjectInspector::draw() {
         }
       }
 
+      ImTable::add("View Mask");
+      const char *viewLabels[5]{"P1", "P2", "P3", "P4", "Shared"};
+      for(int view=0; view<5; ++view) {
+        if(view)ImGui::SameLine();
+        bool enabled = (tableObj->viewMask & (1u << view)) != 0;
+        ImGui::PushID(view);
+        if(ImGui::Checkbox(viewLabels[view], &enabled)) {
+          Editor::UndoRedo::getHistory().markChanged("Edit Object View Mask");
+          if(enabled)tableObj->viewMask |= 1u << view;
+          else tableObj->viewMask &= ~(1u << view);
+        }
+        ImGui::PopID();
+      }
+
       ImTable::end();
     }
   }

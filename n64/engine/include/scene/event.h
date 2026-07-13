@@ -3,6 +3,7 @@
 * @license MIT
 */
 #pragma once
+#include <cstdint>
 #include <libdragon.h>
 #include <vector>
 
@@ -24,6 +25,9 @@ namespace P64
     uint16_t senderId{};
     uint16_t type{};
     uint32_t value{};
+    /** One-based physical player number; defaults to player one for legacy senders. */
+    uint8_t sourcePlayer{1};
+    uint8_t padding[3]{};
   };
 
   struct ObjectEventWrapper
@@ -42,11 +46,12 @@ namespace P64
       events.reserve(DEF_EVENT_SIZE);
     }
 
-    void add(uint16_t targetId, uint16_t senderId, uint16_t type, uint32_t value) {
+    void add(uint16_t targetId, uint16_t senderId, uint16_t type, uint32_t value, uint8_t sourcePlayer = 1) {
       events.emplace_back(ObjectEvent{
         .senderId = senderId,
         .type = type,
-        .value = value
+        .value = value,
+        .sourcePlayer = sourcePlayer
       }, targetId);
     }
 

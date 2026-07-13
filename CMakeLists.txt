@@ -180,6 +180,7 @@ add_executable(pyrite64 src/main.cpp
         src/editor/pages/parts/sceneInspector.cpp
         src/build/projectBuilder.h
         src/build/projectBuilder.cpp
+        src/build/inputBuilder.cpp
         src/build/romMetaBuilder.h
         src/build/romMetaBuilder.cpp
         src/utils/fs.h
@@ -196,6 +197,8 @@ add_executable(pyrite64 src/main.cpp
         src/editor/pages/parts/logWindow.h
         src/editor/pages/parts/memoryDashboard.h
         src/editor/pages/parts/memoryDashboard.cpp
+        src/editor/pages/parts/multiplayerWorkspace.h
+        src/editor/pages/parts/multiplayerWorkspace.cpp
         src/editor/pages/parts/projectSettings.h
         src/editor/pages/parts/projectSettings.cpp
         src/editor/pages/parts/preferenceOverlay.cpp
@@ -260,6 +263,8 @@ add_executable(pyrite64 src/main.cpp
         src/project/component/types/compAudio2d.cpp
         src/project/component/types/compAudio3d.cpp
         src/project/component/types/compUI.cpp
+        src/project/component/types/compPlayerSpawn.cpp
+        src/project/component/types/compBlobShadow.cpp
         src/editor/pages/parts/layerInspector.cpp
         src/build/prefabBuilder.cpp
         src/project/component/types/compConstraint.cpp

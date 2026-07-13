@@ -15,6 +15,9 @@ N64_CC = N64_INST / "bin" / "mips64-elf-gcc" if N64_INST is not None else None
 @unittest.skipUnless(N64_CXX is not None and N64_CXX.is_file(), "set N64_INST to the installed libdragon SDK")
 class N64IntegrationTests(unittest.TestCase):
     def compile_engine_source(self, relative_source: str) -> subprocess.CompletedProcess[str]:
+        return self.compile_cpp_source(ROOT / "n64" / "engine" / "src" / relative_source)
+
+    def compile_cpp_source(self, source: Path) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "source.o"
             return subprocess.run(
@@ -46,7 +49,7 @@ class N64IntegrationTests(unittest.TestCase):
                     "-Wformat-overflow",
                     "-Wformat-truncation",
                     "-Wfatal-errors",
-                    str(ROOT / "n64" / "engine" / "src" / relative_source),
+                    str(source),
                     "-o",
                     str(output),
                 ],
@@ -116,6 +119,39 @@ class N64IntegrationTests(unittest.TestCase):
 
     def test_chunk_mesh_compiles_with_engine_werror_policy(self) -> None:
         proc = self.compile_engine_source("renderer/chunkMesh.cpp")
+
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_multiplayer_runtime_compiles_with_engine_werror_policy(self) -> None:
+        for source in (
+            "input/input.cpp",
+            "multiplayer/session.cpp",
+            "multiplayer/viewports.cpp",
+            "multiplayer/spawns.cpp",
+            "multiplayer/groupCamera.cpp",
+            "scene/components/playerSpawn.cpp",
+        ):
+            with self.subTest(source=source):
+                proc = self.compile_engine_source(source)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_multiplayer_scene_ui_and_audio_compile_with_engine_werror_policy(self) -> None:
+        for source in (
+            "scene/camera.cpp",
+            "scene/components/camera.cpp",
+            "scene/components/ui.cpp",
+            "scene/scene.cpp",
+            "audio/spatialAudio.cpp",
+            "audio/audioManager.cpp",
+        ):
+            with self.subTest(source=source):
+                proc = self.compile_engine_source(source)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_multiplayer_reference_mode_compiles_with_engine_werror_policy(self) -> None:
+        proc = self.compile_cpp_source(
+            ROOT / "n64" / "examples" / "multiplayer" / "src" / "user" / "MultiplayerModes.cpp"
+        )
 
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 

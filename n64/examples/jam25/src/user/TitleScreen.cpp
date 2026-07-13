@@ -6,6 +6,7 @@
 
 #include "systems/dialog.h"
 #include "../p64/assetTable.h"
+#include "input/input.h"
 
 namespace
 {
@@ -40,7 +41,6 @@ namespace P64::Script::C0CC4367B29A36ED
 
     float camTime;
     int selOption;
-    joypad_8way_t lastDirInp;
   );
 
   void init(Object& obj, Data *data)
@@ -50,13 +50,11 @@ namespace P64::Script::C0CC4367B29A36ED
     data->camTime = 0;
     data->selOption = 0;
     data->isFadeOut = false;
-    data->lastDirInp = JOYPAD_8WAY_NONE;
   }
 
   void update(Object& obj, Data *data, float deltaTime)
   {
-    auto pressed = joypad_get_buttons_pressed(JOYPAD_PORT_1);
-    auto upDown = joypad_get_direction(JOYPAD_PORT_1, JOYPAD_2D_ANY);
+    auto pressed = Input::rawButtonsPressed(0);
 
     // Camera
     data->camTime += deltaTime * 0.02f;
@@ -75,19 +73,13 @@ namespace P64::Script::C0CC4367B29A36ED
     cam.setLookAt(obj.pos, target);
 
     // Menu logic
-    if(upDown == data->lastDirInp) {
-      upDown = JOYPAD_8WAY_NONE;
-    } else {
-      data->lastDirInp = upDown;
-    }
-
     auto graphComp = obj.getComponent<Comp::NodeGraph>();
     if(!graphComp->isRunning())
     {
-      if(upDown == JOYPAD_8WAY_UP) {
+      if(pressed.d_up) {
         data->selOption = (data->selOption + 1) % 2;
         AudioManager::play2D("sfx/UiSelect.wav64"_asset).setVolume(0.3f);
-      } else if(upDown == JOYPAD_8WAY_DOWN) {
+      } else if(pressed.d_down) {
         data->selOption = (data->selOption + 1) % 2;
         AudioManager::play2D("sfx/UiSelect.wav64"_asset).setVolume(0.3f);
       } else

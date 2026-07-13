@@ -18,6 +18,7 @@
 #include "renderer/drawLayer.h"
 #include "debug/profiler.h"
 #include "script/globalScript.h"
+#include "input/input.h"
 
 P64::GlobalState P64::state{};
 
@@ -64,6 +65,8 @@ int main()
   tpx_init({});
 
   joypad_init();
+  P64::Input::initialize();
+  P64::Input::loadConfig();
 
   P64::AssetManager::init();
   P64::AudioManager::init();

@@ -4,6 +4,7 @@
 #include "scene/components/charBody.h"
 #include "debug/debugMenu.h"
 #include "debug/debugDraw.h"
+#include "input/input.h"
 
 namespace
 {
@@ -65,8 +66,8 @@ namespace P64::Script::CD0A328E7EE01313
   void destroy(Object& obj, Data *data) {}
 
   void update(Object& obj, Data *data, float deltaTime) {
-    auto inp     = joypad_get_inputs(JOYPAD_PORT_1);
-    auto pressed = joypad_get_buttons_pressed(JOYPAD_PORT_1);
+    auto inp     = Input::get(0).raw;
+    auto pressed = Input::rawButtonsPressed(0);
 
     auto &body = obj.getComponent<P64::Comp::CharBody>()->getBody();
 

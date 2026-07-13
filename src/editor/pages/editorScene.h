@@ -8,6 +8,7 @@
 #include "parts/layerInspector.h"
 #include "parts/logWindow.h"
 #include "parts/memoryDashboard.h"
+#include "parts/multiplayerWorkspace.h"
 #include "parts/nodeEditor.h"
 #include "parts/objectInspector.h"
 #include "parts/preferenceOverlay.h"
@@ -48,6 +49,7 @@ namespace Editor
       ObjectInspector objectInspector{};
       LogWindow logWindow{};
       MemoryDashboard memoryDashboard{};
+      MultiplayerWorkspace multiplayerWorkspace{};
       SceneGraph sceneGraph{};
 
       ImGuiID dockLeftID;
@@ -63,7 +65,7 @@ namespace Editor
       std::map<std::string, WindowSet> sessionWindows{};
       // Path of the project whose windows are currently restored ("" = none yet).
       std::string restoredForProject{};
-      enum class Workspace : uint8_t { SCENE, UI, FOCUS };
+      enum class Workspace : uint8_t { SCENE, UI, MULTIPLAYER, FOCUS };
       Workspace activeWorkspace{Workspace::SCENE};
       std::string activeFocusArea{};
       nlohmann::json focusCatalog{};

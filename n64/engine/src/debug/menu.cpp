@@ -4,6 +4,7 @@
 */
 #include "../../include/debug/menu.h"
 #include "debug/debugDraw.h"
+#include "input/input.h"
 
 namespace
 {
@@ -18,20 +19,23 @@ void P64::Debug::Menu::update()
     return activSubMenu->update();
   }
 
-  auto btn = joypad_get_buttons_pressed(JOYPAD_PORT_1);
-  auto held = joypad_get_buttons_held(JOYPAD_PORT_1);
+  const auto &input = Input::get(0);
+  const auto btn = input.buttonsPressed;
+  const auto held = input.buttonsHeld;
+  auto pressed = [btn](Input::Button button) { return (btn & Input::mask(button)) != 0; };
+  auto isHeld = [held](Input::Button button) { return (held & Input::mask(button)) != 0; };
 
-  if(btn.d_up && !held.l)
+  if(pressed(Input::Button::D_UP) && !isHeld(Input::Button::L))
   {
     if(currIndex == 0)currIndex = items.size() - 1;
     else --currIndex;
   }
-  if(btn.d_down)++currIndex;
+  if(pressed(Input::Button::D_DOWN))++currIndex;
   if(currIndex > items.size() - 1)currIndex = 0;
 
   // --- Hold logic for left/right ---
-  bool left = held.d_left;
-  bool right = held.d_right;
+  bool left = isHeld(Input::Button::D_LEFT);
+  bool right = isHeld(Input::Button::D_RIGHT);
   static bool prevLeft = false;
   static bool prevRight = false;
 

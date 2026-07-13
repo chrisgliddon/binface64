@@ -9,6 +9,8 @@
 #include <limits>
 #include <libdragon.h>
 
+#include "debug/profiler.h"
+
 namespace
 {
   bool multiplyFits(std::size_t lhs, std::size_t rhs, std::size_t &result)
@@ -250,6 +252,7 @@ namespace P64::Renderer
         metrics_.submittedTriangles += config_.trianglesPerBatch;
       }
     }
+    Profiler::recordChunk(metrics_.submittedTriangles, metrics_.drawBatches);
     return metrics_;
   }
 }

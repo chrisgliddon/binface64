@@ -69,4 +69,27 @@ namespace P64::Audio::Spatial
       .distance = distance,
     };
   }
+
+  Mix calculateStrongest(
+    const Vec3 &source,
+    const Listener *listeners,
+    std::size_t listenerCount,
+    const Settings &settings)
+  {
+    if(listeners == nullptr || listenerCount == 0)return calculate(source, Listener{}, settings);
+    Mix result{};
+    result.distance = 1.0e30f;
+    for(std::size_t index=0; index<listenerCount; ++index) {
+      const auto contribution = calculate(source, listeners[index], settings);
+      result.left = std::max(result.left, contribution.left);
+      result.right = std::max(result.right, contribution.right);
+      result.attenuation = std::max(result.attenuation, contribution.attenuation);
+      result.distance = std::min(result.distance, contribution.distance);
+    }
+    result.left = std::clamp(result.left, 0.0f, 1.0f);
+    result.right = std::clamp(result.right, 0.0f, 1.0f);
+    const float total = result.left + result.right;
+    result.pan = total > 0.0f ? result.right / total : 0.5f;
+    return result;
+  }
 }

@@ -41,6 +41,7 @@ namespace Project
       bool proportionalScale{false};
       bool enabled{true};
       bool selectable{true};
+      std::uint8_t viewMask{0x1F};
 
       std::unordered_map<uint64_t, GenericValue> propOverrides{};
 

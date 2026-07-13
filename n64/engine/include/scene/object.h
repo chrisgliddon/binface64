@@ -57,6 +57,15 @@ namespace P64
         }
       }
 
+      [[nodiscard]] uint8_t getViewMask() const {
+        const auto value = static_cast<uint8_t>((flags & ObjectFlags::VIEW_MASK) >> 8);
+        return (flags & ObjectFlags::VIEW_MASK_AUTHORED) ? value : 0x1F;
+      }
+      void setViewMask(uint8_t mask) {
+        flags = static_cast<uint16_t>((flags & ~ObjectFlags::VIEW_MASK) |
+          ObjectFlags::VIEW_MASK_AUTHORED | ((mask & 0x1Fu) << 8));
+      }
+
       /**
        * Returns pointer to the component reference table.
        * This is beyond the Object struct, but still in valid allocated memory.

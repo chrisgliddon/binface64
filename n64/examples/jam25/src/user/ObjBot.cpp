@@ -4,6 +4,7 @@
 #include "systems/marker.h"
 
 #include "scene/components/collBody.h"
+#include "input/input.h"
 
 namespace
 {
@@ -65,7 +66,7 @@ namespace P64::Script::C4F4D286D6CB0DE3
       return;
     }
 
-    auto inp = joypad_get_inputs(JOYPAD_PORT_1);
+    auto inp = Input::get(0).raw;
 
     if(inp.btn.start)SceneManager::load(SceneManager::getCurrent().getId() == 1 ? 2 : 1);
 

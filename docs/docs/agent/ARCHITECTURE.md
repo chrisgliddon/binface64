@@ -213,7 +213,7 @@ A game links: `engine.a` + user `src/user/*.cpp` + generated `src/p64/*.cpp`, pa
 
 **Runtime vs editor component systems — totally different:**
 - Editor: `Project::Component::Entry` with `shared_ptr<void> data`, `CompInfo` with `FuncCompDraw/FuncCompBuild/FuncCompSerial` etc. (`src/project/component/components.h`), keyed by `int id` + `uint64_t uuid`, glm types, JSON-serialized.
-- Runtime: `P64::ComponentDef` with raw function pointers `update/fixedUpdate/draw/onEvent/onColl/initDel/getAllocSize` (`scene/componentTable.h:26-35`), keyed by `uint8_t ID`, packed bytes. The runtime table is a fixed `constexpr`-initialized array of 16 slots filled in `src/scene/componentTable.cpp:58-72` via the `SET_COMP` macro + `HAS_FUNC_TPL` SFINAE detection (lines 24-54) that nulls-out any callback a component doesn't define.
+- Runtime: `P64::ComponentDef` with raw function pointers `update/unscaledUpdate/fixedUpdate/draw/onEvent/onColl/initDel/getAllocSize`, keyed by `uint8_t ID`, packed bytes. The runtime table is a fixed `constexpr`-initialized array of 17 slots filled via the `SET_COMP` macro + `HAS_FUNC_TPL` SFINAE detection that nulls-out callbacks a component does not define.
 
 **Component IDs (runtime)** (`scene/components/*.h`):
 | ID | Component | Header |
@@ -231,6 +231,10 @@ A game links: `engine.a` + user `src/user/*.cpp` + generated `src/p64/*.cpp`, pa
 | 10 | Model (animated) | `animModel.h` |
 | 11 | Rigid-Body | `rigidBody.h` |
 | 12 | Character-Body | `charBody.h` |
+| 13 | UI Document | `ui.h` |
+| 14 | Audio (3D) | `audio3d.h` |
+| 15 | Player Spawn | `playerSpawn.h` |
+| 16 | Blob Shadow | `blobShadow.h` |
 
 **GOTCHA:** There are *two* `nodeGraph.h` headers — `n64/engine/include/scene/components/nodeGraph.h` (the runtime component) and `n64/engine/include/script/nodeGraph.h` (the script runtime) — easy to confuse.
 
@@ -474,7 +478,7 @@ Serialized with `doc.dump(minify ? -1 : 2)` (`scene.cpp:392`) — pretty-printed
 ```
 Deserialized by `Object::deserialize` `object.cpp:105-172`. Note: `uuid` is a **32-bit** hash for scene objects; prefab UUIDs are 64-bit. A legacy `"id"` field may be present but is intentionally ignored (`object.cpp:109-110`); runtime ids are build-time only (`object.h:31-33`, assigned in `Scene::assignRuntimeIds` `scene.cpp:493-514`, max 65535).
 
-**Components:** `Component::Entry` (`components.h`): `id` (int index into `Component::TABLE`), `uuid` (u64), `name`, `data` (shared_ptr<void>). The `TABLE` maps ids 0-13 to the 14 component types, including UI Document at id 13. Each `CompInfo` has `funcSerialize`/`funcDeserialize` that produce/consume the `data` JSON object. **GOTCHA:** the `id` is a plain integer that must stay stable — adding or reordering component types breaks all saved scenes. The `constexpr TABLE` order is the canonical id assignment.
+**Components:** `Component::Entry` (`components.h`): `id` (int index into `Component::TABLE`), `uuid` (u64), `name`, `data` (shared_ptr<void>). The `TABLE` maps stable ids 0-16 to 17 component types, ending with Player Spawn at id 15 and Blob Shadow at id 16. Each `CompInfo` has `funcSerialize`/`funcDeserialize` that produce/consume the `data` JSON object. **GOTCHA:** the `id` is a plain integer that must stay stable — adding or reordering component types breaks all saved scenes. The `constexpr TABLE` order is the canonical id assignment.
 
 **Headless mutation:** `tools/bf64.py` exposes scene lifecycle, object-tree, component, and attachment commands over this same JSON contract. Proposed documents are validated before same-directory atomic replacement. Scene deletion is transactional across the scene directory and `project.p64proj`, with automatic rollback when final project validation or I/O fails. Generated object UUIDs are 32-bit; component UUIDs are 64-bit, matching the editor model.
 

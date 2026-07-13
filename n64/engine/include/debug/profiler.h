@@ -5,7 +5,6 @@
 #pragma once
 
 #include <cstdint>
-#include <t3d/t3dmodel.h>
 
 namespace P64::Profiler
 {
@@ -18,7 +17,12 @@ namespace P64::Profiler
   void configure(Config config);
   [[nodiscard]] bool isActive();
   void beginFrame(float deltaTime);
-  void recordObject(const T3DObject *object);
-  void recordModel(const T3DModel *model);
+  void setActivity(std::uint8_t activePlayers, std::uint8_t activeCameras);
+  void beginCamera(std::uint8_t cameraIndex);
+  void recordObject(const void *object);
+  void recordModel(const void *model);
+  void recordProcedural(std::uint32_t triangles, std::uint32_t batches = 1, std::uint32_t materialChanges = 0);
+  void recordChunk(std::uint32_t triangles, std::uint32_t batches);
+  void recordParticles(std::uint32_t particleCount);
   void endFrame();
 }

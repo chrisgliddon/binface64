@@ -19,6 +19,7 @@ namespace P64::GlobalScript
     SCENE_POST_UNLOAD,
 
     // Logic
+    SCENE_UNSCALED_UPDATE,
     SCENE_UPDATE,
 
     // Drawing

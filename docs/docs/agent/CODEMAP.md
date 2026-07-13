@@ -193,7 +193,9 @@ Host SDL3 + ImGui + glm + quickjs-ng app. Built by root `CMakeLists.txt` as `pyr
 
 | Subdir | Headers | Role |
 |---|---|---|
-| `scene/` | `scene.h`, `sceneManager.h`, `object.h`, `objectFlags.h`, `event.h`, `componentTable.h`, `camera.h`, `lighting.h`, `globalState.h`, and `components/*` | Scene mgmt, object/component model, events, 15 stable-id components including UI Document and Audio3D. |
+| `scene/` | `scene.h`, `sceneManager.h`, `object.h`, `objectFlags.h`, `event.h`, `componentTable.h`, `camera.h`, `lighting.h`, `globalState.h`, and `components/*` | Scene mgmt, object/component model, events, 17 stable-id components including UI, Audio3D, Player Spawn, and Blob Shadow. |
+| `input/` | `input.h` | Four fixed-port input snapshots, action/axis routing, consumption, and timed rumble. |
+| `multiplayer/` | `session.h`, `viewports.h`, `spawns.h`, `groupCamera.h` | Persistent match state, split layouts, deterministic spawn selection, and shared-camera framing. |
 | `renderer/` | `pipeline.h`, `pipelineHDRBloom.h`, `pipelineBigTex.h`, `drawLayer.h`, `material.h`, `chunkMesh.h`, `hdr/postProcess.h`, `bigtex/textures.h`, `bigtex/uvTexture.h`, `particles/ptxSystem.h`, `particles/ptxSprites.h` | 3 render pipelines, materials, triple-buffered procedural chunks, big-texture streaming, particles. |
 | `collision/` | 24 headers (`collisionScene.h`, `aabbTree.h`, `aabb.h`, `gjk.h`, `epa.h`, `collide.h`, `contact.h`, `colliderShape.h`, `rigidBody.h`, `meshCollider.h`, `characterBody.h`, `attach.h`, `raycast.h`, `capsuleSweep.h`, `sphereSweep.h`, `shapes.h`, `types.h`, `vecMath.h`, `matrix3x3.h`, `gfxScale.h`, `contactUtils.h`, `fmMath.h`, `fmCollision.h`, `fmTypes.h`) | Physics & collision: AABB-tree broadphase, GJK/EPA narrowphase, 6 shapes, RigidBody, MeshCollider, CharacterBody, raycast/sweep queries. |
 | `audio/` | `audioManager.h`, `spatialAudio.h` | 32-channel WAV64/XM64 mixer, handles/listener, 2D and positional playback math. |
@@ -217,7 +219,7 @@ Mirrors the include tree: `scene/`, `renderer/` (with `hdr/`, `bigtex/`, `partic
 | `src/scene/scene.cpp` | `P64::Scene::update`/`draw`/`addObject`/`removeObject`/`sendEvent`/`onObjectCollision`. The per-frame logic + render dispatch. |
 | `src/scene/sceneManager.cpp` | `SceneManager::run`/`load`/`reload`/`getCurrent`. Fires global hooks around load/unload. |
 | `src/scene/sceneLoader.cpp` | Binary scene loader. `rom:/p64/sNNNN_` (config) + `_o` (objects). `memalign(8,...)` single-alloc Object + CompRef[] + data blob. Deferred `initDel`. READY event queue. |
-| `src/scene/componentTable.cpp:58` | `COMP_TABLE[16]` — runtime component registry via `SET_COMP` + `HAS_FUNC_TPL` SFINAE. |
+| `src/scene/componentTable.cpp` | `COMP_TABLE[17]` — runtime component registry via `SET_COMP` + `HAS_FUNC_TPL` SFINAE. |
 | `src/vi/swapChain.cpp` | Triple-buffered VI. VBlank handler, 200ms RSP-timeout escape hatch (lines 132-137). |
 | `src/renderer/pipelineDefault.cpp` / `pipelineHDRBloom.cpp` / `pipelineBigTex.cpp` | The 3 pipelines. HDR/BigTex assert 320×240 RGBA16. |
 | `src/renderer/bigtex/*` | BigTex streaming: `textures.cpp` (18-texture pool), `uvTexture.cpp`, `memory.cpp` (own allocator), `applyTexture.S` + `rsp_bigtex.S` (RSP ucode). |
@@ -231,7 +233,7 @@ Mirrors the include tree: `scene/`, `renderer/` (with `hdr/`, `bigtex/`, `partic
 | `src/assets/assetManager.cpp` | Global asset table init/load/freeAll. Tagged-pointer trick (type+flags in high bits). |
 | `src/script/nodeGraph.cpp` | `NodeGraph::load` — patches bytecode first slot with C `GraphFunc` by UUID. |
 
-### 2.2 `n64/examples/` — 6 runnable example games
+### 2.2 `n64/examples/` — runnable example games
 
 Each is a full project (`.p64proj`, `Makefile.custom`, `assets/`, `data/scenes/<id>/scene.json`, `src/user/*.cpp`).
 

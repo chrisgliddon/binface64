@@ -19,6 +19,15 @@ namespace P64::ObjectFlags
   constexpr uint16_t SELF_HIDDEN        = 1 << 6; // if true, object drawing is disabled
   constexpr uint16_t PARENTS_HIDDEN     = 1 << 7; // true if all ancestors are hidden, used to determine final hidden state
 
+  constexpr uint16_t VIEW_PLAYER_1 = 1 << 8;
+  constexpr uint16_t VIEW_PLAYER_2 = 1 << 9;
+  constexpr uint16_t VIEW_PLAYER_3 = 1 << 10;
+  constexpr uint16_t VIEW_PLAYER_4 = 1 << 11;
+  constexpr uint16_t VIEW_SHARED   = 1 << 12;
+  constexpr uint16_t VIEW_MASK_AUTHORED = 1 << 13;
+  constexpr uint16_t VIEW_ALL = VIEW_PLAYER_1 | VIEW_PLAYER_2 | VIEW_PLAYER_3 | VIEW_PLAYER_4 | VIEW_SHARED;
+
   constexpr uint16_t ACTIVE = SELF_ACTIVE | PARENTS_ACTIVE;
   constexpr uint16_t HIDDEN = SELF_HIDDEN | PARENTS_HIDDEN;
+  constexpr uint16_t VIEW_MASK = VIEW_ALL;
 }

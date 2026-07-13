@@ -16,7 +16,7 @@
     "internal_error": 3
   },
   "engine": {
-    "max_component_id": 14,
+    "max_component_id": 16,
     "ui_document_version": 1,
     "ui_max_elements": 256,
     "ui_max_text_length": 256,
@@ -283,6 +283,22 @@
         "requires_expansion_pak": true
       }
     }
+  },
+  "multiplayer": {
+    "max_local_players": 4,
+    "stable_ports": [1, 2, 3, 4],
+    "ui_input_owners": ["port1", "port2", "port3", "port4", "host", "any", "disabled"],
+    "camera_modes": ["shared", "player"],
+    "shared_camera_recommended_for_4mb": true,
+    "profile_fields": [
+      "active_players",
+      "active_cameras",
+      "per_camera_model_submissions",
+      "procedural_triangles",
+      "chunk_triangles",
+      "particles",
+      "material_changes"
+    ]
   },
   "rom": {
     "target_cart_mib": [8, 16, 32, 64],

@@ -38,6 +38,7 @@ namespace Build
   bool buildUIAssets(Project::Project &project, SceneCtx &sceneCtx);
   bool buildPrefabAssets(Project::Project &project, SceneCtx &sceneCtx);
   bool buildNodeGraphAssets(Project::Project &project, SceneCtx &sceneCtx);
+  bool buildInputConfig(Project::Project &project, SceneCtx &sceneCtx);
 
   bool buildProject(const std::string &path);
 

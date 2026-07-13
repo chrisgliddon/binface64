@@ -2,6 +2,7 @@
 
 #include "globals.h"
 #include "script/userScript.h"
+#include "input/input.h"
 
 namespace
 {
@@ -103,7 +104,7 @@ namespace P64::Script::C56A0C143A2EE1E7
     rdpq_set_prim_color(color);
     rspq_block_run(data->dplBg);
 
-    /*auto held = joypad_get_buttons_held(JOYPAD_PORT_1);
+    /*auto held = Input::rawButtonsHeld(0);
     if(!held.a)
     {*/
     const rdpq_fontstyle_t style{.color =  color};
