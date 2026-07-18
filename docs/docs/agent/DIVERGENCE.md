@@ -96,6 +96,7 @@ Every BF64 change to the shared core (§3.2) gets a row here before the PR is me
 
 | Date | Change | Files | Classification | Upstream PR? | Notes |
 |---|---|---|---|---|---|
+| 2026-07-18 | README rewrite + `Readme.md` → `README.md` rename, `LICENSE` second copyright line, `CONTRIBUTING.md`, three issue templates, PR template update | `Readme.md`→`README.md`, `LICENSE`, `CONTRIBUTING.md` (new), `.github/ISSUE_TEMPLATE/*`, `.github/pull_request_template.md`, `docs/docs/agent/DIVERGENCE.md` (this row + §7 reference fix) | BF64-only / conditional | No | README rewrite keeps upstream's "© 2025-2026 - Max Bebök (HailToDodongo)" line and the "does NOT use any proprietary N64 SDKs" notice verbatim per §7; BF64 credits added below. `LICENSE` adds a second copyright line (additive). `CONTRIBUTING.md` and the issue/PR templates are new BF64-only files. The `Readme.md`→`README.md` rename is a shared-core filename change; if upstream ever renames too, resolve in favor of upstream's casing. |
 | 2026-07-12 | Complete BF64 shippability tranche (UI flow, typed/XM-safe audio and pitch, cartridge saves, profiling, procedural chunks) | `n64/engine/*`, UI/audio editor builders, `tools/bf64.py` | BF64-only / conditional | No | Additive runtime APIs and isolated editor fields; candidate bug fixes can be split out later. FlashRAM driver is prefixed to avoid colliding when libdragon PR #925 lands. |
 | 2026-07-12 | Normalize incomplete asset sidecars and prune excluded outputs | `tools/bf64.py`, `src/build/projectBuilder.cpp` | mergeable upstream | Not opened | Standalone correctness fixes; stale T3DM stream cleanup is narrowly ownership-scoped. |
 | 2026-07-12 | Linux editor/native/MIPS regression gates | `.github/workflows/editor.yml`, `tests/` | BF64-only | No | Exercises the shared editor CLI against BF64 contracts without changing upstream release behavior. |
@@ -166,7 +167,7 @@ docs/
 
 ## 7. Attribution
 
-- Upstream Pyrite64 credits stay intact in `Readme.md`, `LICENSE`, and the docs footer. BF64's README rewrite (Phase 8) keeps the "© 2025-2026 - Max Bebök (HailToDodoko)" line and the "Pyrite64 does NOT use any proprietary N64 SDKs" notice verbatim.
+- Upstream Pyrite64 credits stay intact in `README.md`, `LICENSE`, and the docs footer. BF64's README rewrite (Phase 8) keeps the "© 2025-2026 - Max Bebök (HailToDodoko)" line and the "Pyrite64 does NOT use any proprietary N64 SDKs" notice verbatim.
 - BF64 adds its own credits block *below* upstream's, never replacing it.
 - Games built *with* BF64 inherit upstream's no-restriction license policy; we add the same no-restriction notice for BF64 itself.
 - When BF64 work is upstreamed (§3.3), the upstream PR credits BF64 by name in the PR description. The maintainer is free to credit or not in the merge commit; we don't insist.
