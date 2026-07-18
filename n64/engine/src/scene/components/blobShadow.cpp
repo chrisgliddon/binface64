@@ -77,11 +77,9 @@ void P64::Comp::BlobShadow::draw(Object &object, BlobShadow *data, [[maybe_unuse
   rdpq_mode_combiner(RDPQ_COMBINER_SHADE);
   t3d_state_set_drawflags(static_cast<T3DDrawFlags>(T3D_FLAG_SHADED | T3D_FLAG_DEPTH | T3D_FLAG_NO_LIGHT));
   auto *matrix = data->matrix.getNext();
-  const fm_vec3_t scale{
-    object.scale.x * data->radius / 256.0f,
-    1.0f,
-    object.scale.z * data->radius / 256.0f
-  };
+  // 256 matches the vertex ring radius baked in initDelete()
+  const float radiusScale = data->radius / 256.0f;
+  const fm_vec3_t scale{radiusScale, 1.0f, radiusScale};
   const fm_quat_t rotation{0.0f, 0.0f, 0.0f, 1.0f};
   const fm_vec3_t position{object.pos.x, object.pos.y + data->yOffset, object.pos.z};
   t3d_mat4fp_from_srt(matrix, scale, rotation, position);

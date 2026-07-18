@@ -52,6 +52,9 @@ int main()
   // asset_init_compression(3);
   dfs_init(DFS_DEFAULT_LOCATION);
 
+  // Init joypad before the thread kernel: pre-kernel, its synchronous Joybus
+  // discovery spin-polls SI directly instead of blocking on kirq_wait.
+  joypad_init();
   kernel_init();
   rdpq_init();
   //rdpq_debug_start();
@@ -64,7 +67,6 @@ int main()
   t3d_init({});
   tpx_init({});
 
-  joypad_init();
   P64::Input::initialize();
   P64::Input::loadConfig();
 
